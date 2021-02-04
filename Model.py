@@ -105,9 +105,11 @@ def dec():
     return model
 
 
-def load_data():
-    ## Nothing yet
-    return None
+def train_model():
+    img_paths = []
+    for dir in os.listdir('true_art'):
+        names = [(dir + '/' + x) for x in os.listdir(dir)]
+        img_paths += names
 
 
 class Model:
@@ -119,6 +121,6 @@ class Model:
         dir = os.getcwd()
 
     def train(self):
-        ## Nothing yet
+        train_model()
         return None
 
