@@ -7,12 +7,14 @@ from tensorflow.python.keras.backend import set_session
 import functools
 from tensorflow.keras.layers import Input, Concatenate
 from PIL import Image
+from sklearn.model_selection import train_test_split
 
 #assert len(tf.config.list_physical_devices('GPU')) > 0
 
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 sess = tf.compat.v1.Session(config=config)
+tf.compat.v1.disable_eager_execution()
 set_session(sess)
 
 num_epochs = 10
@@ -36,10 +38,10 @@ def encoder():
 
 
 def enc():
-    x = Input(shape=(128, 128, 3))
+    inp = Input(shape=(256, 256, 3))
 
     ### Layer 0 ###
-    x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same', activation='relu')(x)
+    x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same', activation='relu')(inp)
     w = tfa.layers.InstanceNormalization()(x)
     #x = tf.keras.layers.MaxPool2D((2, 2))(w)
     x = w
@@ -62,18 +64,18 @@ def enc():
     '''
     ### Latent Space ###
     y = tf.keras.layers.Flatten()(x)
-    z = tf.keras.layers.Dense(32*32*3/2, activation='relu')(y)
+    z = tf.keras.layers.Dense(64*64*3/2, activation='relu')(y)
     x = z#tf.keras.layers.Dense(1, activation='sigmoid')(z)
 
-    model = net(inputs=Input(shape=(128, 128, 3)), outputs=x, name='Encoder')
+    model = tf.keras.models.Model(inputs=inp, outputs=x, name='Encoder')
     return model
 
 
 def enc5():
-    x = Input(shape=(128, 128, 3))
+    inp = Input(shape=(256, 256, 3))
 
     ### Layer 0 ###
-    x = tf.keras.layers.Conv2D(num_filters, kernel_size=(7, 7), activation='relu')(x)
+    x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), padding='same', activation='relu')(inp)
     w = tfa.layers.InstanceNormalization()(x)
     x = tf.keras.layers.MaxPool2D((2, 2))(w)
     '''
@@ -95,17 +97,17 @@ def enc5():
     '''
     ### Classification ###
     y = tf.keras.layers.Flatten()(x)
-    z = tf.keras.layers.Dense(512, activation='relu')(y)
-    x = tf.keras.layers.Dense(1, activation='sigmoid')(z)
+    z = tf.keras.layers.Dense(64, activation='relu')(y)
+    #x = tf.keras.layers.Dense(1, activation='sigmoid')(z)
 
-    model = net(inputs=Input(shape=(128, 128, 3)), outputs=x, name='Encoder5')
+    model = tf.keras.models.Model(inputs=inp, outputs=z, name='Encoder5')
     return model
 
 
 def dec():
     conv2DT = tf.keras.layers.Conv2DTranspose
     normalize = tf.keras.layers.BatchNormalization
-    inp = Input(shape=(32, 32, 3))
+    inp = Input(shape=(64, 64, 3))
 
     ### ????? ###
     x = conv2DT(num_filters, (3, 3), strides=(1,1), padding='same', activation='relu')(inp)
@@ -116,10 +118,9 @@ def dec():
     w = normalize()(x)
     x = conv2DT(3, (3, 3), strides=(1,1), padding='same', activation='relu')(w)
     #w = normalize()(x)
-    print(x.shape)
-    w = tf.keras.layers.Reshape(target_shape=(128, 128, 3))(x)
+    w = tf.keras.layers.Reshape(target_shape=(256, 256, 3))(x)
 
-    model = net(inputs=inp, outputs=w, name='Decoder1')
+    model = tf.keras.Model(inputs=inp, outputs=w, name='Decoder1')
     return model
 
 
@@ -148,25 +149,18 @@ def read_images():
             imagepaths.append(os.path.join(c_dir, sample))
             labels.append(label)
         label += 1
+    train, test = train_test_split(np.array(imagepaths), train_size=1)
+    return np.array_split(train, batch_size)
 
-    # Convert to Tensor
-    imagepaths = tf.convert_to_tensor(imagepaths, dtype=tf.string)
-    labels = tf.convert_to_tensor(labels, dtype=tf.int32)
-    # Build a TF Queue, shuffle data
-    dataset = tf.data.Dataset.from_tensor_slices((imagepaths, labels))
 
-    def _parse_function(filename, label):
-        image_string = tf.io.read_file(filename)
-        image_decoded = tf.image.decode_jpeg(image_string, channels=3)
-        image = tf.cast(image_decoded, tf.float32)
-        return image, label
-
-    dataset = dataset.map(_parse_function)
-    dataset = dataset.batch(batch_size=batch_size)
-
-    # step 4: create iterator and final input tensor
-    iterator = dataset.as_numpy_iterator()
-    return iterator
+def load_image(fnames):
+    images = np.expand_dims(np.empty(shape=(256, 256, 3)), axis=0)
+    for image_path in fnames:
+        image = tf.keras.preprocessing.image.load_img(image_path)
+        input_arr = np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(image)),axis=0)
+        np.append(arr=images, values=np.expand_dims(input_arr, axis=0)) # Convert single images to a batch.
+        print(images.shape)
+    return images
 
 
 def train_step(source, style, model, optimizer):
@@ -175,10 +169,12 @@ def train_step(source, style, model, optimizer):
     enc5 = model.encoder5
     deco = model.decoder
     with tf.GradientTape() as tape:
-        loss5 = tf.reduce_mean(tf.abs(source), axis=(1, 2, 3))
-        lossA = tf.reduce_mean(tf.abs(source - deco(tf.concat(enc1(source), enc2(source))))+
-                               tf.abs(source - deco(tf.concat(enc1(style), enc2(style))))+
+        print(enc5(model(source, style)).shape)
+        loss5 = tf.reduce_mean(tf.abs(enc5(model(source, style)) - enc5(source)), axis=(1, 2, 3))
+        lossA = tf.reduce_mean(tf.abs(source - model(source, source))+
+                               tf.abs(source - model(style, style))+
                                loss5, axis=(1, 2, 3))
+
     grads = tape.gradient(lossA, model.trainable_variables)
     optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
@@ -188,28 +184,19 @@ def train_step(source, style, model, optimizer):
 
 
 def train_model(model):
-    ite = read_images()
+    dataset = read_images()
 
-    with tf.compat.v1.Session() as ses:
-        for i in range(num_epochs):
-            print("\nStarting epoch {}/{}".format(i + 1, num_epochs))
-            for idx in range(0, ite.__sizeof__(), batch_size):
-                # First grab a batch of training data and convert the input images to tensors
-                source = ite.next()
-                style = ite.next()
-                source = tf.convert_to_tensor(source, dtype=tf.float32)
-                style = tf.convert_to_tensor(style, dtype=tf.float32)
-                # print(tf.shape(images[0]))
-                loss = train_step(source, style, model, optimizer)
+    for i in range(num_epochs):
+        print("\nStarting epoch {}/{}".format(i + 1, num_epochs))
+        for idx in range(0, len(dataset), 2):
+            # First grab a batch of training data and convert the input images to tensors
+            source = load_image(dataset[idx])
+            style = load_image(dataset[idx+1])
+            source = tf.convert_to_tensor(source, dtype=tf.float32)
+            style = tf.convert_to_tensor(style, dtype=tf.float32)
+            # print(tf.shape(images[0]))
+            train_step(source, style, model, optimizer)
     model.save()
-
-
-class net(tf.keras.Model):
-
-    def __init__(self, inputs=None, outputs=None, name=None):
-        super(net, self).__init__()
-        self.inputs = inputs
-        self.outputs = outputs
 
 
 class AE_A(tf.keras.Model):
@@ -239,6 +226,9 @@ class AE_A(tf.keras.Model):
         self.encoder5 = tf.keras.models.load_model(dir + fname + '\encoder5')
         self.decoder = tf.keras.models.load_model(dir + fname + '\decoder')
 
+    def call(self, source, style):
+        return self.decoder(tf.concat(self.encoder1(source), self.encoder2(style)))
+
     def train(self):
         train_model(self)
 
@@ -246,7 +236,6 @@ class AE_A(tf.keras.Model):
         y = self.decoder(tf.concat(self.encoder1(source), self.encoder2(style)))
         plt.imshow(np.squeeze(y))
         plt.show
-
 
 model = AE_A()
 model.train()
