@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 sess = tf.compat.v1.Session(config=config)
-tf.compat.v1.disable_eager_execution()
+#tf.compat.v1.disable_eager_execution()
 set_session(sess)
 
 num_epochs = 10
@@ -37,22 +37,31 @@ def encoder():
     return seq
 
 
-def enc():
-    inp = Input(shape=(256, 256, 3))
+def get_model():
+    # Create a simple model.
+    inputs = tf.keras.Input(shape=(256, 256, 3))
+    outputs = tf.keras.layers.Flatten()(inputs)
+    outputs = tf.keras.layers.Dense(4)(outputs)
+    outputs = tf.keras.layers.Dense(4)(outputs)
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+    model.compile(optimizer="adam", loss="mean_squared_error")
+    return model
 
-    ### Layer 0 ###
+
+def enc(name):
+    conv2D = tf.keras.layers.Conv2D
+    normalize = tfa.layers.InstanceNormalization
+    inp = tf.keras.Input(shape=(256, 256, 3))
+
     x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same', activation='relu')(inp)
-    w = tfa.layers.InstanceNormalization()(x)
-    #x = tf.keras.layers.MaxPool2D((2, 2))(w)
-    x = w
+    x = tfa.layers.InstanceNormalization()(x)
+    #x = tf.keras.layers.MaxPool2D((2, 2))(x)
+    x = conv2D(num_filters, (3, 3), strides=2, padding='same', activation='relu')(x)
+    x = normalize()(x)
+    x = conv2D(num_filters, (3, 3), strides=2, padding='same', activation='relu')(x)
+    x = normalize()(x)
+    x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same', activation='relu')(x)
 
-    ### Layer 1 ###
-    y = encoder()(x)
-    w = y#Concatenate()([x, y])
-    x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same', activation='relu')(w)
-    #y = encoder()(x)
-    #w = y#Concatenate()([x, y])
-    #x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), activation='relu')(w)
     '''
     ### Layer 2 ###
     y = encoder()(x)
@@ -63,16 +72,16 @@ def enc():
     x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), activation='relu')(w)
     '''
     ### Latent Space ###
-    y = tf.keras.layers.Flatten()(x)
-    z = tf.keras.layers.Dense(64*64*3/2, activation='relu')(y)
-    x = z#tf.keras.layers.Dense(1, activation='sigmoid')(z)
+    x = tf.keras.layers.Flatten()(x)
+    w = tf.keras.layers.Dense(64*64*3/2, activation='relu')(x)
+    #x = z#tf.keras.layers.Dense(1, activation='sigmoid')(z)
 
-    model = tf.keras.models.Model(inputs=inp, outputs=x, name='Encoder')
+    model = tf.keras.models.Model(inputs=inp, outputs=w, name=name)
     return model
 
 
 def enc5():
-    inp = Input(shape=(256, 256, 3))
+    inp = tf.keras.Input(shape=(256, 256, 3))
 
     ### Layer 0 ###
     x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), padding='same', activation='relu')(inp)
@@ -97,30 +106,34 @@ def enc5():
     '''
     ### Classification ###
     y = tf.keras.layers.Flatten()(x)
-    z = tf.keras.layers.Dense(64, activation='relu')(y)
+    z = tf.keras.layers.Dense(512, activation='relu')(y)
     #x = tf.keras.layers.Dense(1, activation='sigmoid')(z)
 
-    model = tf.keras.models.Model(inputs=inp, outputs=z, name='Encoder5')
+    model = tf.keras.models.Model(inputs=inp, outputs=z, name="enc5")
     return model
 
+encode5 = enc5()
+encode5.compile(optimizer=optimizer, loss="mean_squared_error")
 
-def dec():
+
+def dec(name):
     conv2DT = tf.keras.layers.Conv2DTranspose
     normalize = tf.keras.layers.BatchNormalization
-    inp = Input(shape=(64, 64, 3))
+    inp = tf.keras.Input(shape=(64*64*3))
+    w = tf.reshape(inp, shape=(1, 64, 64, 3))
 
     ### ????? ###
-    x = conv2DT(num_filters, (3, 3), strides=(1,1), padding='same', activation='relu')(inp)
+    x = conv2DT(num_filters, (3, 3), strides=(1, 1), padding='same', activation='relu')(w)
     w = normalize()(x)
-    x = conv2DT(num_filters, (3, 3), strides=(2,2), padding='same', activation='relu')(w)
+    x = conv2DT(num_filters, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
     w = normalize()(x)
-    x = conv2DT(num_filters, (3, 3), strides=(2,2), padding='same', activation='relu')(w)
+    x = conv2DT(num_filters, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
     w = normalize()(x)
-    x = conv2DT(3, (3, 3), strides=(1,1), padding='same', activation='relu')(w)
+    x = conv2DT(3, (3, 3), strides=(1, 1), padding='same', activation='relu')(w)
     #w = normalize()(x)
     w = tf.keras.layers.Reshape(target_shape=(256, 256, 3))(x)
 
-    model = tf.keras.Model(inputs=inp, outputs=w, name='Decoder1')
+    model = tf.keras.models.Model(inputs=inp, outputs=w, name=name)
     return model
 
 
@@ -150,6 +163,7 @@ def read_images():
             labels.append(label)
         label += 1
     train, test = train_test_split(np.array(imagepaths), train_size=1)
+    print(train.shape)
     return np.array_split(train, batch_size)
 
 
@@ -159,53 +173,24 @@ def load_image(fnames):
         image = tf.keras.preprocessing.image.load_img(image_path)
         input_arr = np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(image)),axis=0)
         np.append(arr=images, values=np.expand_dims(input_arr, axis=0)) # Convert single images to a batch.
-        print(images.shape)
     return images
-
-
-def train_step(source, style, model, optimizer):
-    enc1 = model.encoder1
-    enc2 = model.encoder2
-    enc5 = model.encoder5
-    deco = model.decoder
-    with tf.GradientTape() as tape:
-        print(enc5(model(source, style)).shape)
-        loss5 = tf.reduce_mean(tf.abs(enc5(model(source, style)) - enc5(source)), axis=(1, 2, 3))
-        lossA = tf.reduce_mean(tf.abs(source - model(source, source))+
-                               tf.abs(source - model(style, style))+
-                               loss5, axis=(1, 2, 3))
-
-    grads = tape.gradient(lossA, model.trainable_variables)
-    optimizer.apply_gradients(zip(grads, model.trainable_variables))
-
-    grads = tape.gradient(loss5, enc5.trainabile_variables)
-    optimizer.apply_gradients(zip(grads, enc5.trainable_variables))
-    return loss5, lossA
-
-
-def train_model(model):
-    dataset = read_images()
-
-    for i in range(num_epochs):
-        print("\nStarting epoch {}/{}".format(i + 1, num_epochs))
-        for idx in range(0, len(dataset), 2):
-            # First grab a batch of training data and convert the input images to tensors
-            source = load_image(dataset[idx])
-            style = load_image(dataset[idx+1])
-            source = tf.convert_to_tensor(source, dtype=tf.float32)
-            style = tf.convert_to_tensor(style, dtype=tf.float32)
-            # print(tf.shape(images[0]))
-            train_step(source, style, model, optimizer)
-    model.save()
 
 
 class AE_A(tf.keras.Model):
     def __init__(self):
         super(AE_A, self).__init__()
-        self.encoder1 = enc()
-        self.encoder2 = enc()
-        self.encoder5 = enc5()
-        self.decoder = dec()
+        self.encoder1 = enc("enc1")
+        self.encoder2 = enc("enc2")
+        self.decoder = dec("dec")
+        self.compile(
+            optimizer=optimizer,
+            loss={
+                "enc1": tf.keras.losses.MeanSquaredError,
+                "enc2": tf.keras.losses.MeanSquaredError,
+                "dec": tf.keras.losses.MeanSquaredError,
+            },
+            loss_weights=[0.2, 0.2, 0.2],
+        )
 
     def save(self, fname):
         dir = os.getcwd() + '\\'
@@ -214,31 +199,124 @@ class AE_A(tf.keras.Model):
                 os.mkdir(dir + fname)
             except OSError:
                 print("File save failed.")
-        self.encoder1.save(dir + fname + '\encoder1')
-        self.encoder2.save(dir + fname + '\encoder2')
-        self.encoder5.save(dir + fname + '\encoder5')
-        self.decoder.save(dir + fname + '\decoder')
+        tf.keras.models.save_model(model=self.encoder1, filepath=dir + fname + '\encoder1')
+        tf.keras.models.save_model(model=self.encoder2, filepath=dir + fname + '\encoder2')
+        tf.keras.models.save_model(model=self.decoder, filepath=dir + fname + '\decoder')
 
     def load(self, fname):
-        dir = os.getcwd() + '/'
+        dir = os.getcwd() + '\\'
         self.encoder1 = tf.keras.models.load_model(dir + fname + '\encoder1')
         self.encoder2 = tf.keras.models.load_model(dir + fname + '\encoder2')
-        self.encoder5 = tf.keras.models.load_model(dir + fname + '\encoder5')
         self.decoder = tf.keras.models.load_model(dir + fname + '\decoder')
 
     def call(self, source, style):
-        return self.decoder(tf.concat(self.encoder1(source), self.encoder2(style)))
+        return self.decoder(tf.concat([self.encoder1(source), self.encoder2(style)], axis=1))
 
-    def train(self):
-        train_model(self)
+    def train_model(self, encoder5):
+        dataset = read_images()
+        print(len(dataset))
+
+        for i in range(1):
+            print("\nStarting epoch {}/{}".format(i + 1, num_epochs))
+            for idx in range(0, len(dataset), 2):
+                # First grab a batch of training data and convert the input images to tensors
+                source = load_image(dataset[idx])
+                style = load_image(dataset[idx + 1])
+                source = tf.convert_to_tensor(source, dtype=tf.float32)
+                style = tf.convert_to_tensor(style, dtype=tf.float32)
+                self.train_step(source, style, encoder5, optimizer)
+                if idx % 100 == 0:
+                    print(idx)
+        self.save('test')
+        encoder5.save('encoder5')
+
+    def train_step(self, source, style, encoder5, optimizer):
+        with tf.GradientTape() as tape:
+            loss5 = tf.reduce_mean(tf.abs(encoder5(model(source, style)) - encoder5(source)), axis=1)
+        grads = tape.gradient(loss5, encoder5.trainable_variables)
+        optimizer.apply_gradients(zip(grads, encoder5.trainable_variables))
+
+        with tf.GradientTape() as tape:
+            loss_a = tf.reduce_mean(tf.abs(source - model(source, source)) +
+                                    tf.abs(source - model(style, style)) +
+                                    loss5, axis=(1, 2, 3))
+        grads = tape.gradient(loss_a, model.trainable_variables)
+        optimizer.apply_gradients(zip(grads, model.trainable_variables))
+
+        return loss5, loss_a
 
     def predict(self, source, style):
-        y = self.decoder(tf.concat(self.encoder1(source), self.encoder2(style)))
-        plt.imshow(np.squeeze(y))
-        plt.show
+        return self.decoder(tf.concat([self.encoder1(source), self.encoder2(style)], axis=1))
+
+
+'''model = enc()
+model.compile(optimizer="adamax", loss="mean_squared_error")
+
+# Train the model.
+test_input = np.random.random((1, 256, 256, 3))
+test_target = np.random.random((1, 6144))
+model.fit(test_input, test_target)
+
+# Calling `save('my_model')` creates a SavedModel folder `my_model`.
+model.save("my_model")
+
+# It can be used to reconstruct the model identically.
+reconstructed_model = tf.keras.models.load_model("my_model")
+
+# Let's check:
+np.testing.assert_allclose(
+    model.predict(test_input), reconstructed_model.predict(test_input)
+)
+
+# The reconstructed model is already compiled and has retained the optimizer
+# state, so training can resume:
+reconstructed_model.fit(test_input, test_target)
+'''
+inp1 = Input(shape=(256, 256, 3))
+inp2 = Input(shape=(256, 256, 3))
+encode1 = enc("enc1")
+encode2 = enc("enc2")
+out1 = tf.concat([encode1.outputs,encode2.outputs], axis=1)
+decode = dec("dec")
+out2 = decode(out1)
+disp = tf.keras.Model(
+    inputs=[encode1.inputs, encode2.inputs],
+    outputs=[out2],
+)
+tf.keras.utils.plot_model(disp, "test.png", show_shapes=True, expand_nested=True)
+
 
 model = AE_A()
-model.train()
-model.save('test')
+#model.train_model(encode5)
+model.load('test')
+model.compile(
+            optimizer=optimizer,
+            loss={
+                "enc1": tf.keras.losses.MeanSquaredError,
+                "enc2": tf.keras.losses.MeanSquaredError,
+                "dec": tf.keras.losses.MeanSquaredError,
+            },
+            loss_weights=[0.2, 0.2, 0.2],
+        )
+images = read_images()
+print(images[0][0])
+source = tf.keras.preprocessing.image.load_img(images[0][0])
+style = tf.keras.preprocessing.image.load_img(images[0][0])
+new_img = model(np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(source)), axis=0),
+                np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(style)), axis=0))
 
+plt.figure(figsize=(6, 6))
 
+plt.subplot(3, 2, 1)
+plt.imshow(source)
+plt.grid(False)
+
+plt.subplot(3, 2, 2)
+plt.imshow(style)
+plt.grid(False)
+
+plt.subplot(2, 1, 2)
+plt.imshow(Image.fromarray(np.squeeze(new_img.numpy(), axis=0), 'RGB'))
+plt.grid(False)
+
+plt.show()
