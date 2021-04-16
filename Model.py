@@ -3,25 +3,26 @@ import tensorflow_addons as tfa
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import time
 from tensorflow.python.keras.backend import set_session
-import functools
 from tensorflow.keras.layers import Input, Concatenate
 from PIL import Image
 from sklearn.model_selection import train_test_split
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
-#assert len(tf.config.list_physical_devices('GPU')) > 0
+assert len(tf.config.list_physical_devices('GPU')) > 0
 
-config = tf.compat.v1.ConfigProto()
-config.gpu_options.allow_growth = True
-sess = tf.compat.v1.Session(config=config)
+tf.keras.backend.clear_session()
+gpu_options = tf.compat.v1.GPUOptions(allow_growth=True)
+sess = tf.compat.v1.InteractiveSession(config=tf.compat.v1.ConfigProto(gpu_options=gpu_options))
 #tf.compat.v1.disable_eager_execution()
 set_session(sess)
 
 reconstruction_learning_rate = 0.4
-num_epochs = 10
-num_filters = 8
-batch_size = 4
-learning_rate = 9e-2
+num_epochs = 35
+num_filters = 2
+batch_size = 2
+learning_rate = 5e-2
 optimizer = tf.keras.optimizers.Adamax(learning_rate=learning_rate)
 
 
@@ -37,17 +38,6 @@ def encoder():
     return seq
 
 
-def get_model():
-    # Create a simple model.
-    inputs = tf.keras.Input(shape=(256, 256, 3))
-    outputs = tf.keras.layers.Flatten()(inputs)
-    outputs = tf.keras.layers.Dense(4)(outputs)
-    outputs = tf.keras.layers.Dense(4)(outputs)
-    model = tf.keras.Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer="adam", loss="mean_squared_error")
-    return model
-
-
 def enc(name):
     conv2D = tf.keras.layers.Conv2D
     normalize = tfa.layers.InstanceNormalization
@@ -56,9 +46,13 @@ def enc(name):
     x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same', activation='relu')(inp)
     x = tfa.layers.InstanceNormalization()(x)
     #x = tf.keras.layers.MaxPool2D((2, 2))(x)
-    x = conv2D(num_filters, (3, 3), strides=2, padding='same', activation='relu')(x)
+    x = conv2D(num_filters*16, (3, 3), strides=(2, 2), padding='same', activation='relu')(x)
     x = normalize()(x)
-    x = conv2D(num_filters, (3, 3), strides=2, padding='same', activation='relu')(x)
+    x = conv2D(num_filters*8, (3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = normalize()(x)
+    x = conv2D(num_filters*4, (3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = normalize()(x)
+    x = conv2D(num_filters*2, (3, 3), strides=(2, 2), padding='same', activation='relu')(x)
     x = normalize()(x)
     x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same', activation='relu')(x)
 
@@ -73,7 +67,7 @@ def enc(name):
     '''
     ### Latent Space ###
     x = tf.keras.layers.Flatten()(x)
-    w = tf.keras.layers.Dense(64*64*3/2, activation='relu')(x)
+    w = tf.keras.layers.Dense(16*16*3/2, activation='relu')(x)
     #x = z#tf.keras.layers.Dense(1, activation='sigmoid')(z)
 
     model = tf.keras.models.Model(inputs=inp, outputs=w, name=name)
@@ -83,15 +77,19 @@ def enc(name):
 def dec(name):
     conv2DT = tf.keras.layers.Conv2DTranspose
     normalize = tf.keras.layers.BatchNormalization
-    inp = tf.keras.Input(shape=(64*64*3))
-    w = tf.reshape(inp, shape=(1, 64, 64, 3))
+    inp = tf.keras.Input(shape=(16*16*3))
+    w = tf.reshape(inp, shape=(1, 16, 16, 3))
 
     ### ????? ###
     x = conv2DT(num_filters, (3, 3), strides=(1, 1), padding='same', activation='relu')(w)
     w = normalize()(x)
-    x = conv2DT(num_filters, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
+    x = conv2DT(num_filters*2, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
     w = normalize()(x)
-    x = conv2DT(num_filters, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
+    x = conv2DT(num_filters*4, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
+    w = normalize()(x)
+    x = conv2DT(num_filters*8, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
+    w = normalize()(x)
+    x = conv2DT(num_filters*16, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
     w = normalize()(x)
     x = conv2DT(3, (3, 3), strides=(1, 1), padding='same', activation='relu')(w)
     #w = normalize()(x)
@@ -126,24 +124,104 @@ def read_images():
             imagepaths.append(os.path.join(c_dir, sample))
             labels.append(label)
         label += 1
-    train, test = train_test_split(np.array(imagepaths), train_size=0.2)
+    train, test = train_test_split(np.array(imagepaths), train_size=0.8)
     num_batches = int(len(train)/batch_size)
-    print(np.array(np.array_split(train, num_batches)).shape)
     return np.array_split(train, num_batches)
+'''tf.keras.preprocessing.image_dataset_from_directory(
+    'D:\Storage\Technical\Linux Resources\Images\ArtGen',
+    labels="inferred",
+    label_mode="int",
+    class_names=None,
+    color_mode="rgb",
+    batch_size=32,
+    image_size=(256, 256),
+    shuffle=True,
+    seed=None,
+    validation_split=0.9,
+    subset=None,
+    interpolation="bilinear",
+    follow_links=False,
+)'''
 
 
-def load_image(fnames):
-    images = np.expand_dims(np.empty(shape=(256, 256, 3)), axis=0)
-    for image_path in fnames:
+def load_image(image_path):
+    try:
         image = tf.keras.preprocessing.image.load_img(image_path)
-        input_arr = np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(image))/255.0,axis=0)
-        np.append(arr=images, values=np.expand_dims(input_arr, axis=0)) # Convert single images to a batch.
-    return images
+        input_arr = np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(image)) / 255.0, axis=0)
+    except Exception:
+        try:
+            os.remove(image_path)
+        except Exception:
+            print("Exception: image invalid, unable to delete image.")
+        input_arr = np.random.rand(1, 256, 256, 3)
+    return input_arr
 
 
-#def get_loss(model):
+def test_model(model, source, style):
+    _, _, new_img = model(np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(source) / 255.0), axis=0),
+                          np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(style) / 255.0), axis=0))
+
+    plt.figure(figsize=(6, 6))
+
+    plt.subplot(3, 2, 1)
+    plt.imshow(source)
+    plt.grid(False)
+
+    plt.subplot(3, 2, 2)
+    plt.imshow(style)
+    plt.grid(False)
+
+    plt.subplot(3, 2, 3)
+    plt.imshow(Image.fromarray(np.squeeze(np.array(new_img * 127.5 + 127.5), axis=0), 'RGB'))
+    plt.grid(False)
+
+    plt.subplot(3, 2, 4)
+    indices = [i for i in range(len(model.loss))]
+    plt.plot(indices, model.loss)
+    plt.grid(False)
+
+    plt.show()
 
 
+'''class DataSetCreator(object):
+    def __init__(self, batch_size, image_height, image_width, dataset):
+        self.batch_size = batch_size
+        self.image_height = image_height
+        self.image_width = image_width
+        self.dataset = dataset
+
+    def _get_class(self, path):
+        pat_splited = tf.strings.split(path, os.path.sep)
+        return pat_splited[-2] == CLASS_NAMES
+
+    def _load_image(self, path):
+        image = tf.io.read_file(path)
+        image = tf.image.decode_jpeg(image, channels=3)
+        image = tf.image.convert_image_dtype(image, tf.float32)
+        return tf.image.resize(image, [self.image_height, self.image_width])
+
+    def _load_labeled_data(self, path):
+        label = self._get_class(path)
+        image = self._load_image(path)
+        return image, label
+
+    def load_process(self, shuffle_size=1000):
+        self.loaded_dataset = self.dataset.map(self._load_labeled_data,
+                                               num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+        self.loaded_dataset = self.loaded_dataset.cache()
+
+        # Shuffle data and create batches
+        self.loaded_dataset = self.loaded_dataset.shuffle(buffer_size=shuffle_size)
+        self.loaded_dataset = self.loaded_dataset.repeat()
+        self.loaded_dataset = self.loaded_dataset.batch(self.batch_size)
+
+        # Make dataset fetch batches in the background during the training of the model.
+        self.loaded_dataset = self.loaded_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+
+    def get_batch(self):
+        return next(iter(self.loaded_dataset))
+'''
 
 class AE_A(tf.keras.Model):
     def __init__(self):
@@ -152,6 +230,7 @@ class AE_A(tf.keras.Model):
         self.encoder2 = enc("enc2")
         self.decoder = dec("dec")
         self.compile(optimizer=optimizer)
+        self.loss=[]
 
     def save(self, fname):
         dir = os.getcwd() + '\\'
@@ -178,22 +257,38 @@ class AE_A(tf.keras.Model):
 
         return source_encoded, style_encoded, decoded
 
-    def train_model(self):
-        dataset = read_images()
-        print("Dataset Length:", len(dataset))
+    def train_model(self, fname=None):
+        try:
+            self.load(fname)
+            print("File load successful.")
+        except Exception:
+            print("File load failed.")
 
         for i in range(num_epochs):
+            dataset = read_images()
             print("\nStarting epoch {}/{}".format(i + 1, num_epochs))
+            start = time.time()
             for idx in range(0, len(dataset), 2):
                 # First grab a batch of training data and convert the input images to tensors
-                source = load_image(dataset[idx])
-                style = load_image(dataset[idx + 1])
-                source = tf.convert_to_tensor(source, dtype=tf.float32)
-                style = tf.convert_to_tensor(style, dtype=tf.float32)
-                self.train_step(source, style, optimizer)
+                for image in range(0, len(dataset[idx])):
+                    try:
+                        source = load_image(dataset[idx][image])
+                        style = load_image(dataset[idx+1][image])
+                        source = tf.convert_to_tensor(source, dtype=tf.float32)
+                        style = tf.convert_to_tensor(style, dtype=tf.float32)
+                        hold = self.train_step(source, style, optimizer)
+                    except Exception:
+                        break
                 if idx % 100 == 0:
                     print(idx)
-        self.save('test')
+                    self.loss+=[hold]
+            duration = time.time()-start
+            print(int(duration/60), "minutes &", int(duration % 60), "seconds, for epoch", i+1)
+            if(i % 5 == 0):
+                source = tf.keras.preprocessing.image.load_img(dataset[idx - 2][0])
+                style = tf.keras.preprocessing.image.load_img(dataset[idx - 1][0])
+                test_model(self, source, style)
+            self.save("test")
 
     def train_step(self, source, style, optimizer):
         cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -245,28 +340,12 @@ reconstructed_model.fit(test_input, test_target)
 '''
 
 model = AE_A()
-#model.train_model()
-model.load('test')
-#tf.keras.utils.plot_model(model.build_graph(), "test.png", show_shapes=True, expand_nested=True)
+tf.keras.utils.plot_model(model.build_graph(), "test.png", show_shapes=True, expand_nested=True)
+model.train_model('test')
+#model.load('test')
 images = read_images()
 print(images[0][0])
 source = tf.keras.preprocessing.image.load_img(images[0][0])
 style = tf.keras.preprocessing.image.load_img(images[1][0])
-_, _, new_img = model(np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(source))/255.0, axis=0),
-                np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(style))/255.0, axis=0))
 
-plt.figure(figsize=(6, 6))
-
-plt.subplot(3, 2, 1)
-plt.imshow(source)
-plt.grid(False)
-
-plt.subplot(3, 2, 2)
-plt.imshow(style)
-plt.grid(False)
-
-plt.subplot(2, 1, 2)
-plt.imshow(Image.fromarray(np.squeeze(np.array(new_img*127.5+127.5), axis=0), 'RGB'))
-plt.grid(False)
-
-plt.show()
+test_model(model, source, style)
