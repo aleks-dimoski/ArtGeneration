@@ -126,7 +126,7 @@ def read_images():
         label += 1
     train, test = train_test_split(np.array(imagepaths), train_size=0.8)
     num_batches = int(len(train)/batch_size)
-    return np.array_split(train, num_batches)
+    return train, test
 '''tf.keras.preprocessing.image_dataset_from_directory(
     'D:\Storage\Technical\Linux Resources\Images\ArtGen',
     labels="inferred",
@@ -155,6 +155,26 @@ def load_image(image_path):
             print("Exception: image invalid, unable to delete image.")
         input_arr = np.random.rand(1, 256, 256, 3)
     return input_arr
+
+
+def create_dataset(image_paths):
+    dgen_params = dict(
+        rescale=1. / 255,
+        shear_range=0.0,
+        zoom_range=0.0,
+        horizontal_flip=True,
+        brightness_range=(0.7, 1.2),
+    )
+    gen_params = dict(
+        target_size=(256, 256),
+        batch_size=batch_size,
+        color_mode='rgb',
+        class_mode='categorical',
+    )
+    image_dgen = tf.keras.preprocessing.image.ImageDataGenerator(**dgen_params)
+    image_gen = image_dgen.flow_from_directory('D:\Storage\Technical\Linux Resources\Images\ArtGen',**gen_params)
+    image_dataset = tf.data.Dataset.from_generator(lambda: image_gen, (tf.float32))
+    return image_dataset
 
 
 def test_model(model, source, style):
@@ -264,16 +284,26 @@ class AE_A(tf.keras.Model):
         except Exception:
             print("File load failed.")
 
+        image_paths = read_images()
+        image_dataset = create_dataset(image_paths)
+
         for i in range(num_epochs):
-            dataset = read_images()
+
             print("\nStarting epoch {}/{}".format(i + 1, num_epochs))
             start = time.time()
-            for idx in range(0, len(dataset), 2):
+
+            for source, style in zip(image_dataset.take(10), image_dataset.take(10)):
+                hold = self.train_step(np.array(source), np.array(style), optimizer)
+                test_model(self, np.array(source), np.array(style))
+            self.loss+=[hold]
+
+
+            '''for idx in range(0, len(image_paths), 2):
                 # First grab a batch of training data and convert the input images to tensors
-                for image in range(0, len(dataset[idx])):
+                for image in range(0, len(image_paths[idx])):
                     try:
-                        source = load_image(dataset[idx][image])
-                        style = load_image(dataset[idx+1][image])
+                        source = load_image(image_paths[idx][image])
+                        style = load_image(image_paths[idx+1][image])
                         source = tf.convert_to_tensor(source, dtype=tf.float32)
                         style = tf.convert_to_tensor(style, dtype=tf.float32)
                         hold = self.train_step(source, style, optimizer)
@@ -281,12 +311,11 @@ class AE_A(tf.keras.Model):
                         break
                 if idx % 100 == 0:
                     print(idx)
-                    self.loss+=[hold]
+                    self.loss+=[hold]'''
+
             duration = time.time()-start
             print(int(duration/60), "minutes &", int(duration % 60), "seconds, for epoch", i+1)
             if(i % 5 == 0):
-                source = tf.keras.preprocessing.image.load_img(dataset[idx - 2][0])
-                style = tf.keras.preprocessing.image.load_img(dataset[idx - 1][0])
                 test_model(self, source, style)
             self.save("test")
 
