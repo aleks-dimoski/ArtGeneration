@@ -159,21 +159,21 @@ def load_image(image_path):
 
 def create_dataset(image_paths):
     dgen_params = dict(
-        rescale=1. / 255,
+        rescale= 1. / 255,
         shear_range=0.0,
         zoom_range=0.0,
         horizontal_flip=True,
         brightness_range=(0.7, 1.2),
     )
     gen_params = dict(
-        target_size=(256, 256),
         batch_size=batch_size,
         color_mode='rgb',
         class_mode='categorical',
     )
     image_dgen = tf.keras.preprocessing.image.ImageDataGenerator(**dgen_params)
     image_gen = image_dgen.flow_from_directory('D:\Storage\Technical\Linux Resources\Images\ArtGen',**gen_params)
-    image_dataset = tf.data.Dataset.from_generator(lambda: image_gen, (tf.float32))
+    image_dataset = tf.data.Dataset.from_generator(lambda: image_gen, output_signature=tf.TensorSpec(shape=(256,256,3), dtype=tf.float32))
+    print(image_dataset)
     return image_dataset
 
 
@@ -284,15 +284,16 @@ class AE_A(tf.keras.Model):
         except Exception:
             print("File load failed.")
 
-        image_paths = read_images()
-        image_dataset = create_dataset(image_paths)
+        #image_paths = read_images()
+        image_dataset = create_dataset('')
 
         for i in range(num_epochs):
 
             print("\nStarting epoch {}/{}".format(i + 1, num_epochs))
             start = time.time()
-
+            print(image_dataset.take(50))
             for source, style in zip(image_dataset.take(10), image_dataset.take(10)):
+                print("hello")
                 hold = self.train_step(np.array(source), np.array(style), optimizer)
                 test_model(self, np.array(source), np.array(style))
             self.loss+=[hold]
