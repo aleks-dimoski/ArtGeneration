@@ -20,10 +20,10 @@ set_session(sess)
 
 reconstruction_learning_rate = 0.4
 num_epochs = 35
-num_filters = 3
+num_filters = 12
 batch_size = 4
-learning_rate = 5e-2
-optimizer = tf.keras.optimizers.Adamax(learning_rate=learning_rate)
+learning_rate = 5e-3
+optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
 
@@ -43,32 +43,23 @@ def enc(name):
     conv2D = tf.keras.layers.Conv2D
     normalize = tfa.layers.InstanceNormalization
     inp = tf.keras.Input(shape=(256, 256, 3))
-
-    x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same', activation='relu')(inp)
-    x = tfa.layers.InstanceNormalization()(x)
+    x = tfa.layers.InstanceNormalization()(inp)
     x = tf.keras.layers.MaxPool2D((2, 2))(x)
-    x = conv2D(num_filters, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
-    x = normalize()(x)
-    x = conv2D(num_filters*2, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
-    x = normalize()(x)
-    x = conv2D(num_filters*4, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
-    x = normalize()(x)
-    x = conv2D(num_filters*8, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
-    x = normalize()(x)
-    x = conv2D(num_filters*16, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
-    x = normalize()(x)
 
-    '''
-    ### Layer 2 ###
-    y = encoder()(x)
-    w = y#Concatenate()([x, y])
-    x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), strides=2, activation='relu')(w)
-    y = encoder()(x)
-    w = y#Concatenate()([x, y])
-    x = tf.keras.layers.Conv2D(num_filters, kernel_size=(3, 3), activation='relu')(w)
-    '''
+    x = conv2D(num_filters, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2D(num_filters*2, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2D(num_filters*4, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2D(num_filters*8, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2D(num_filters*16, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+
     ### Latent Space ###
     x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(512/2, activation='relu')(x)
     w = tf.keras.layers.Dense(32*4*4*num_filters/2, activation='relu')(x)
     #x = z#tf.keras.layers.Dense(1, activation='sigmoid')(z)
 
@@ -80,22 +71,19 @@ def dec(name):
     conv2DT = tf.keras.layers.Conv2DTranspose
     normalize = tf.keras.layers.BatchNormalization
     inp = tf.keras.Input(shape=(32*4*4*num_filters))
-    w = tf.keras.layers.Reshape((4, 4, 32 * num_filters))(inp)
+    x = tf.keras.layers.Reshape((4, 4, 32 * num_filters))(inp)
 
-    ### ????? ###
-    x = conv2DT(num_filters*32, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
-    w = normalize()(x)
-    x = conv2DT(num_filters*16, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
-    w = normalize()(x)
-    x = conv2DT(num_filters*8, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
-    w = normalize()(x)
-    x = conv2DT(num_filters*4, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
-    w = normalize()(x)
-    x = conv2DT(num_filters*2, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
-    w = normalize()(x)
-    x = conv2DT(num_filters, (3, 3), strides=(2, 2), padding='same', activation='relu')(w)
-    #w = normalize()(x)
-    w = tf.keras.layers.Reshape(target_shape=(256, 256, 3))(x)
+    x = conv2DT(num_filters*32, (3, 3), strides=(2, 2), padding='same')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2DT(num_filters*16, (3, 3), strides=(2, 2), padding='same')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2DT(num_filters*8, (3, 3), strides=(2, 2), padding='same')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2DT(num_filters*4, (3, 3), strides=(2, 2), padding='same')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2DT(num_filters*2, (3, 3), strides=(2, 2), padding='same')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    w = conv2DT(3, (3, 3), strides=(2, 2), padding='same', activation='sigmoid')(x)
 
     model = tf.keras.models.Model(inputs=inp, outputs=w, name=name)
     return model
@@ -129,21 +117,6 @@ def read_images():
     train, test = train_test_split(np.array(imagepaths), train_size=0.8)
     num_batches = int(len(train)/batch_size)
     return train, test
-'''tf.keras.preprocessing.image_dataset_from_directory(
-    'D:\Storage\Technical\Linux Resources\Images\ArtGen',
-    labels="inferred",
-    label_mode="int",
-    class_names=None,
-    color_mode="rgb",
-    batch_size=32,
-    image_size=(256, 256),
-    shuffle=True,
-    seed=None,
-    validation_split=0.9,
-    subset=None,
-    interpolation="bilinear",
-    follow_links=False,
-)'''
 
 
 def load_image(image_path):
@@ -192,7 +165,7 @@ def test_model(model, source, style):
     plt.grid(False)
 
     plt.subplot(3, 2, 3)
-    plt.imshow(Image.fromarray(np.array(new_img[0] * 127.5 + 127.5), 'RGB'))
+    plt.imshow(Image.fromarray(np.array(new_img[0]), 'RGB'))
     plt.grid(False)
 
     plt.subplot(3, 2, 4)
@@ -202,46 +175,6 @@ def test_model(model, source, style):
 
     plt.show()
 
-
-'''class DataSetCreator(object):
-    def __init__(self, batch_size, image_height, image_width, dataset):
-        self.batch_size = batch_size
-        self.image_height = image_height
-        self.image_width = image_width
-        self.dataset = dataset
-
-    def _get_class(self, path):
-        pat_splited = tf.strings.split(path, os.path.sep)
-        return pat_splited[-2] == CLASS_NAMES
-
-    def _load_image(self, path):
-        image = tf.io.read_file(path)
-        image = tf.image.decode_jpeg(image, channels=3)
-        image = tf.image.convert_image_dtype(image, tf.float32)
-        return tf.image.resize(image, [self.image_height, self.image_width])
-
-    def _load_labeled_data(self, path):
-        label = self._get_class(path)
-        image = self._load_image(path)
-        return image, label
-
-    def load_process(self, shuffle_size=1000):
-        self.loaded_dataset = self.dataset.map(self._load_labeled_data,
-                                               num_parallel_calls=tf.data.experimental.AUTOTUNE)
-
-        self.loaded_dataset = self.loaded_dataset.cache()
-
-        # Shuffle data and create batches
-        self.loaded_dataset = self.loaded_dataset.shuffle(buffer_size=shuffle_size)
-        self.loaded_dataset = self.loaded_dataset.repeat()
-        self.loaded_dataset = self.loaded_dataset.batch(self.batch_size)
-
-        # Make dataset fetch batches in the background during the training of the model.
-        self.loaded_dataset = self.loaded_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-
-    def get_batch(self):
-        return next(iter(self.loaded_dataset))
-'''
 
 class AE_A(tf.keras.Model):
     def __init__(self):
@@ -284,7 +217,6 @@ class AE_A(tf.keras.Model):
         except Exception:
             print("File load failed.")
 
-        #image_paths = read_images()
         image_dataset, dataset_size = create_dataset()
         dataset_size = dataset_size-1
         print("Dataset size is", dataset_size)
@@ -304,12 +236,13 @@ class AE_A(tf.keras.Model):
                     print("Batch #", batch_on, "failed. Continuing with next batch.")
                 batch_on += 1
             duration = time.time()-start
-            print(int(duration/60), "minutes &", int(duration % 60), "seconds, for epoch", i+1)
+            print(int(duration/60), "minutes &", int(duration % 60), "seconds, for epoch", i)
             if i % 5 == 0:
                 test_model(self, source, style)
             print('\n')
             image_dataset, _ = create_dataset()
             self.save("test")
+            time.sleep(5)
 
     def train_step(self, source, style, optimizer):
         with tf.GradientTape() as tape:
@@ -317,9 +250,12 @@ class AE_A(tf.keras.Model):
             _, _, prediction = self(source, style)
             _, _, source_reconstruction = self(source, source)
             # _, _, style_reconstruction = self(style, style)
-            loss = tf.abs(0.8 * cross_entropy(source, prediction) +
-                    0.2 * cross_entropy(encoder2(style), encoder2(prediction)) +
-                    reconstruction_learning_rate * cross_entropy(source, source_reconstruction)) * learning_rate
+            loss = tf.abs(0.8 * tf.reduce_mean((source-prediction)**2) +
+                    0.2 * tf.reduce_mean((encoder2(style)-encoder2(prediction))**2) +
+                    reconstruction_learning_rate * tf.reduce_mean((source-source_reconstruction)**2)) * learning_rate
+            # print("\nContent error:", tf.reduce_mean((source-prediction)**2))
+            # print("Style error:", tf.reduce_mean((encoder2(style)-encoder2(prediction))**2))
+            # print("Identity error:", tf.reduce_mean((source-source_reconstruction)**2))
 
         grads = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
@@ -331,37 +267,12 @@ class AE_A(tf.keras.Model):
         return tf.keras.Model(inputs=[source, style], outputs=self.call(source, style))
 
 
-
-'''model = enc()
-model.compile(optimizer="adamax", loss="mean_squared_error")
-
-# Train the model.
-test_input = np.random.random((1, 256, 256, 3))
-test_target = np.random.random((1, 6144))
-model.fit(test_input, test_target)
-
-# Calling `save('my_model')` creates a SavedModel folder `my_model`.
-model.save("my_model")
-
-# It can be used to reconstruct the model identically.
-reconstructed_model = tf.keras.models.load_model("my_model")
-
-# Let's check:
-np.testing.assert_allclose(
-    model.predict(test_input), reconstructed_model.predict(test_input)
-)
-
-# The reconstructed model is already compiled and has retained the optimizer
-# state, so training can resume:
-reconstructed_model.fit(test_input, test_target)
-'''
-
 model = AE_A()
 tf.keras.utils.plot_model(model.build_graph(), "test.png", show_shapes=True, expand_nested=True)
 model.train_model('test')
 model.load('test')
 image_dataset, _ = create_dataset()
 
-for source, style in zip(image_dataset.take(1), image_dataset.take()):
+for source, style in zip(image_dataset.take(1), image_dataset.take(1)):
     test_model(model, source, style)
     break
