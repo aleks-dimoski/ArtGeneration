@@ -5,10 +5,8 @@ import matplotlib.pyplot as plt
 import os
 import time
 from tensorflow.python.keras.backend import set_session
-from tensorflow.keras.layers import Input, Concatenate
+from tensorflow.keras.layers import Input
 from PIL import Image
-from sklearn.model_selection import train_test_split
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 assert len(tf.config.list_physical_devices('GPU')) > 0
 
@@ -18,25 +16,21 @@ sess = tf.compat.v1.InteractiveSession(config=tf.compat.v1.ConfigProto(gpu_optio
 #tf.compat.v1.disable_eager_execution()
 set_session(sess)
 
-reconstruction_learning_rate = 0.4
-num_epochs = 35
+content_lr = 0.8
+style_lr = 1
+identity_lr = 2
+num_epochs = 200
 num_filters = 12
-batch_size = 4
-learning_rate = 5e-3
+batch_size = 16
+learning_rate = 2e-3
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
 
-def encoder():
-    conv2D = tf.keras.layers.Conv2D
-    normalize = tfa.layers.InstanceNormalization
-    seq = tf.keras.Sequential([
-        conv2D(num_filters, (3, 3), strides=2, padding='same', activation='relu'),
-        normalize(),
-        conv2D(num_filters, (3, 3), strides=2, padding='same', activation='relu'),
-        normalize(),
-    ])
-    return seq
+def lrelu_bn(inputs):
+    lrelu = tf.keras.layers.LeakyReLU()(inputs)
+    bn = tf.keras.layers.BatchNormalization()(lrelu)
+    return bn
 
 
 def enc(name):
@@ -44,92 +38,58 @@ def enc(name):
     normalize = tfa.layers.InstanceNormalization
     inp = tf.keras.Input(shape=(256, 256, 3))
     x = tfa.layers.InstanceNormalization()(inp)
-    x = tf.keras.layers.MaxPool2D((2, 2))(x)
-
-    x = conv2D(num_filters, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = conv2D(6, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
     x = tf.keras.layers.LeakyReLU()(x)
+    x2 = conv2D(num_filters, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = tf.keras.layers.LeakyReLU()(x2)
     x = conv2D(num_filters*2, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
     x = tf.keras.layers.LeakyReLU()(x)
-    x = conv2D(num_filters*4, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
+    x1 = conv2D(num_filters*4, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu', name='skip_con')(x)
+    x = tf.keras.layers.LeakyReLU()(x1)
     x = conv2D(num_filters*8, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
     x = tf.keras.layers.LeakyReLU()(x)
     x = conv2D(num_filters*16, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
     x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2D(num_filters*32, kernel_size=(3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
 
     ### Latent Space ###
     x = tf.keras.layers.Flatten()(x)
-    x = tf.keras.layers.Dense(512/2, activation='relu')(x)
-    w = tf.keras.layers.Dense(32*4*4*num_filters/2, activation='relu')(x)
+    x = tf.keras.layers.Dense(256, activation='relu')(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
+    w = tf.keras.layers.Dense(32*2*2*num_filters, activation='relu')(x)
     #x = z#tf.keras.layers.Dense(1, activation='sigmoid')(z)
 
-    model = tf.keras.models.Model(inputs=inp, outputs=w, name=name)
+    model = tf.keras.models.Model(inputs=inp, outputs=[w, x1, x2], name=name)
     return model
 
 
 def dec(name):
     conv2DT = tf.keras.layers.Conv2DTranspose
     normalize = tf.keras.layers.BatchNormalization
-    inp = tf.keras.Input(shape=(32*4*4*num_filters))
-    x = tf.keras.layers.Reshape((4, 4, 32 * num_filters))(inp)
+    inp = tf.keras.Input(shape=(32*2*2*num_filters))
+    skip_con1 = tf.keras.Input(shape=(16, 16, 48))
+    skip_con2 = tf.keras.Input(shape=(64, 64, 12))
+    x = tf.keras.layers.Reshape((2, 2, 32 * num_filters))(inp)
 
-    x = conv2DT(num_filters*32, (3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
     x = conv2DT(num_filters*16, (3, 3), strides=(2, 2), padding='same')(x)
     x = tf.keras.layers.LeakyReLU()(x)
     x = conv2DT(num_filters*8, (3, 3), strides=(2, 2), padding='same')(x)
     x = tf.keras.layers.LeakyReLU()(x)
     x = conv2DT(num_filters*4, (3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
+    x = tf.keras.layers.Add()([x, skip_con1])
+    x = lrelu_bn(x)
     x = conv2DT(num_filters*2, (3, 3), strides=(2, 2), padding='same')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2DT(num_filters, (3, 3), strides=(2, 2), padding='same')(x)
+    x = tf.keras.layers.Add()([x, skip_con2])
+    x = lrelu_bn(x)
+    x = conv2DT(6, (3, 3), strides=(2, 2), padding='same')(x)
     x = tf.keras.layers.LeakyReLU()(x)
     w = conv2DT(3, (3, 3), strides=(2, 2), padding='same', activation='sigmoid')(x)
 
-    model = tf.keras.models.Model(inputs=inp, outputs=w, name=name)
+    model = tf.keras.models.Model(inputs=[inp, skip_con1, skip_con2], outputs=w, name=name)
     return model
-
-
-def read_images():
-    imagepaths, labels = list(), list()
-    dataset_path = 'D:\Storage\Technical\Linux Resources\Images\ArtGen'
-
-    # An ID will be affected to each sub-folders by alphabetical order
-    label = 0
-    # List the directory
-    try:  # Python 2
-        classes = sorted(os.walk(dataset_path).next()[1])
-    except Exception:  # Python 3
-        classes = sorted(os.walk(dataset_path).__next__()[1])
-    # List each sub-directory (the classes)
-    for c in classes:
-        c_dir = os.path.join(dataset_path, c)
-        try:  # Python 2
-            walk = os.walk(c_dir).next()
-        except Exception:  # Python 3
-            walk = os.walk(c_dir).__next__()
-        # Add each image to the training set
-        for sample in walk[2]:
-            # Only keeps jpeg images
-            #if sample.endswith('.jpg') or sample.endswith('.jpeg'):
-            imagepaths.append(os.path.join(c_dir, sample))
-            labels.append(label)
-        label += 1
-    train, test = train_test_split(np.array(imagepaths), train_size=0.8)
-    num_batches = int(len(train)/batch_size)
-    return train, test
-
-
-def load_image(image_path):
-    try:
-        image = tf.keras.preprocessing.image.load_img(image_path)
-        input_arr = np.expand_dims(np.array(tf.keras.preprocessing.image.img_to_array(image)) / 255.0, axis=0)
-    except Exception:
-        try:
-            os.remove(image_path)
-        except Exception:
-            print("Exception: image invalid, unable to delete image.")
-        input_arr = np.random.rand(1, 256, 256, 3)
-    return input_arr
 
 
 def create_dataset(image_paths=None):
@@ -151,9 +111,11 @@ def create_dataset(image_paths=None):
     return image_dataset, len(image_gen)
 
 
-def test_model(model, source, style):
+def test_model(model, source, style, num=0):
     _, _, new_img = model(source, style)
-
+    pred = Image.fromarray(np.array(new_img[0]), 'RGB')
+    pred.save(os.path.join('pred', 'pred_at_epoch_'+str(num)+'.png'))
+    '''
     plt.figure(figsize=(6, 6))
 
     plt.subplot(3, 2, 1)
@@ -164,16 +126,20 @@ def test_model(model, source, style):
     plt.imshow(style[0])
     plt.grid(False)
 
-    plt.subplot(3, 2, 3)
-    plt.imshow(Image.fromarray(np.array(new_img[0]), 'RGB'))
+    plt.subplot(3, 1, 2)
+    
+    plt.imshow(pred)
     plt.grid(False)
 
-    plt.subplot(3, 2, 4)
-    indices = [i for i in range(len(model.loss))]
-    plt.plot(indices, model.loss)
+    plt.subplot(3, 1, 3)
+    indices = [i for i in range(len(model.loss_content))]
+    plt.plot(indices, model.loss_content, label='Content', color='blue')
+    plt.plot(indices, model.loss_style, label='Style', color='green')
+    plt.plot(indices, model.loss_identity, label='Identity', color='red')
+    plt.legend()
     plt.grid(False)
 
-    plt.show()
+    plt.show()'''
 
 
 class AE_A(tf.keras.Model):
@@ -183,7 +149,9 @@ class AE_A(tf.keras.Model):
         self.encoder2 = enc("enc2")
         self.decoder = dec("dec")
         self.compile(optimizer=optimizer)
-        self.loss = []
+        self.loss_content = []
+        self.loss_style = []
+        self.loss_identity = []
 
     def save(self, fname):
         dir = os.getcwd() + '\\'
@@ -205,12 +173,12 @@ class AE_A(tf.keras.Model):
     def call(self, source, style):
         source_encoded = self.encoder1(source)
         style_encoded = self.encoder2(style)
-        encoded = tf.concat([source_encoded, style_encoded], axis=1)
-        decoded = self.decoder(encoded)
-
+        encoded = tf.keras.layers.Add(name='combine')([source_encoded[0], style_encoded[0]])
+        decoded = self.decoder([encoded, source_encoded[1], source_encoded[2]])
         return source_encoded, style_encoded, decoded
 
     def train_model(self, fname=None):
+        time.sleep(5)
         try:
             self.load(fname)
             print("File load successful.")
@@ -222,27 +190,32 @@ class AE_A(tf.keras.Model):
         print("Dataset size is", dataset_size)
         print("Total number of images is", dataset_size*batch_size)
 
+        start_time = time.time()
+        print("Beginning training at", start_time)
         for i in range(num_epochs):
             print("Starting epoch {}/{}".format(i, num_epochs))
             start = time.time()
             batch_on = 0
-            for source, style in zip(image_dataset.take(300), image_dataset.take(300)):
+            for source, style in zip(image_dataset.take(int(dataset_size/4)), image_dataset.take(int(dataset_size/4))):
                 try:
-                    hold = self.train_step(source, style, optimizer)
-                    if batch_on % 50 == 0:
-                        print("Beginning batch #" + str(batch_on), 'of size', batch_size)
-                        self.loss += [hold]
+                    loss_content, loss_style, loss_identity = self.train_step(source, style, optimizer)
+                    if batch_on % 10 == 0:
+                        print("Beginning batch #" + str(batch_on), 'out of', int(dataset_size/4), 'of size', batch_size)
+                        self.loss_content += [loss_content]
+                        self.loss_style += [loss_style]
+                        self.loss_identity += [loss_identity]
                 except Exception:
                     print("Batch #", batch_on, "failed. Continuing with next batch.")
                 batch_on += 1
             duration = time.time()-start
             print(int(duration/60), "minutes &", int(duration % 60), "seconds, for epoch", i)
-            if i % 5 == 0:
-                test_model(self, source, style)
+            if i % 20 == 0:
+                test_model(self, source, style, i)
             print('\n')
             image_dataset, _ = create_dataset()
             self.save("test")
-            time.sleep(5)
+            time.sleep(1)
+        print('Training completed in', int((time.time()-start_time) / 60), "minutes &", int(duration % 60), "seconds")
 
     def train_step(self, source, style, optimizer):
         with tf.GradientTape() as tape:
@@ -250,16 +223,14 @@ class AE_A(tf.keras.Model):
             _, _, prediction = self(source, style)
             _, _, source_reconstruction = self(source, source)
             # _, _, style_reconstruction = self(style, style)
-            loss = tf.abs(0.8 * tf.reduce_mean((source-prediction)**2) +
-                    0.2 * tf.reduce_mean((encoder2(style)-encoder2(prediction))**2) +
-                    reconstruction_learning_rate * tf.reduce_mean((source-source_reconstruction)**2)) * learning_rate
-            # print("\nContent error:", tf.reduce_mean((source-prediction)**2))
-            # print("Style error:", tf.reduce_mean((encoder2(style)-encoder2(prediction))**2))
-            # print("Identity error:", tf.reduce_mean((source-source_reconstruction)**2))
+            loss_content = tf.abs(content_lr * tf.reduce_mean((source-prediction)**2))
+            loss_style = tf.abs(style_lr * tf.reduce_mean((encoder2(style)[0]-encoder2(prediction)[0])**2))
+            loss_identity = tf.abs(identity_lr * tf.reduce_mean((source-source_reconstruction)**2))
+            loss = loss_content + loss_style + loss_identity
 
         grads = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        return loss
+        return loss_content, loss_style, loss_identity
 
     def build_graph(self):
         source = Input(shape=(256, 256, 3))
