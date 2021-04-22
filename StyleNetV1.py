@@ -6,7 +6,7 @@ import os
 import time
 from tensorflow.python.keras.backend import set_session
 from tensorflow.keras.layers import Input
-from PIL import Image
+import utils
 
 assert len(tf.config.list_physical_devices('GPU')) > 0
 
@@ -25,7 +25,7 @@ batch_size = 16
 learning_rate = 2e-3
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-
+model_name = 'V1'
 
 def lrelu_bn(inputs):
     lrelu = tf.keras.layers.LeakyReLU()(inputs)
@@ -92,56 +92,6 @@ def dec(name):
     return model
 
 
-def create_dataset(image_paths=None):
-    dgen_params = dict(
-        rescale=1./255,
-        shear_range=0.0,
-        zoom_range=0.0,
-        horizontal_flip=True,
-        brightness_range=(0.7, 1.2),
-    )
-    gen_params = dict(
-        batch_size=batch_size,
-        color_mode='rgb',
-        class_mode=None
-    )
-    image_dgen = tf.keras.preprocessing.image.ImageDataGenerator(**dgen_params)
-    image_gen = image_dgen.flow_from_directory('D:\Storage\Technical\Linux Resources\Images\ArtGen',**gen_params)
-    image_dataset = tf.data.Dataset.from_generator(lambda: image_gen, output_signature=tf.TensorSpec(shape=(None, 256, 256, 3), dtype=tf.float32))
-    return image_dataset, len(image_gen)
-
-
-def test_model(model, source, style, num=0):
-    _, _, new_img = model(source, style)
-    pred = Image.fromarray(np.array(new_img[0]), 'RGB')
-    pred.save(os.path.join('pred', 'pred_at_epoch_'+str(num)+'.png'))
-    '''
-    plt.figure(figsize=(6, 6))
-
-    plt.subplot(3, 2, 1)
-    plt.imshow(source[0])
-    plt.grid(False)
-
-    plt.subplot(3, 2, 2)
-    plt.imshow(style[0])
-    plt.grid(False)
-
-    plt.subplot(3, 1, 2)
-    
-    plt.imshow(pred)
-    plt.grid(False)
-
-    plt.subplot(3, 1, 3)
-    indices = [i for i in range(len(model.loss_content))]
-    plt.plot(indices, model.loss_content, label='Content', color='blue')
-    plt.plot(indices, model.loss_style, label='Style', color='green')
-    plt.plot(indices, model.loss_identity, label='Identity', color='red')
-    plt.legend()
-    plt.grid(False)
-
-    plt.show()'''
-
-
 class AE_A(tf.keras.Model):
     def __init__(self):
         super(AE_A, self).__init__()
@@ -185,13 +135,14 @@ class AE_A(tf.keras.Model):
         except Exception:
             print("File load failed.")
 
-        image_dataset, dataset_size = create_dataset()
+        image_dataset, dataset_size = utils.create_dataset()
         dataset_size = dataset_size-1
         print("Dataset size is", dataset_size)
         print("Total number of images is", dataset_size*batch_size)
 
         start_time = time.time()
         print("Beginning training at", start_time)
+
         for i in range(num_epochs):
             print("Starting epoch {}/{}".format(i, num_epochs))
             start = time.time()
@@ -210,9 +161,9 @@ class AE_A(tf.keras.Model):
             duration = time.time()-start
             print(int(duration/60), "minutes &", int(duration % 60), "seconds, for epoch", i)
             if i % 20 == 0:
-                test_model(self, source, style, i)
+                utils.test_model(self, source, style, i)
             print('\n')
-            image_dataset, _ = create_dataset()
+            image_dataset, _ = utils.create_dataset()
             self.save("test")
             time.sleep(1)
         print('Training completed in', int((time.time()-start_time) / 60), "minutes &", int(duration % 60), "seconds")
@@ -235,15 +186,15 @@ class AE_A(tf.keras.Model):
     def build_graph(self):
         source = Input(shape=(256, 256, 3))
         style = Input(shape=(256, 256, 3))
-        return tf.keras.Model(inputs=[source, style], outputs=self.call(source, style))
+        return tf.keras.Model(inputs=[source, style], outputs=self.call(source, style), name=model_name)
 
 
 model = AE_A()
-tf.keras.utils.plot_model(model.build_graph(), "test.png", show_shapes=True, expand_nested=True)
-model.train_model('test')
-model.load('test')
-image_dataset, _ = create_dataset()
+tf.keras.utils.plot_model(model.build_graph(), model_name+".png", show_shapes=True, expand_nested=True)
+model.train_model(model_name)
+model.load(model_name)
+image_dataset, _ = utils.create_dataset()
 
 for source, style in zip(image_dataset.take(1), image_dataset.take(1)):
-    test_model(model, source, style)
+    utils.test_model(model, source, style, num='test', last_test=True)
     break
