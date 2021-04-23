@@ -26,12 +26,20 @@ def create_dataset(batch_size=4):
     return image_dataset, len(image_gen)
 
 
-def test_model(model, source, style, num='0', test=False, name='test'):
+def test_model(model, source=None, style=None, num='0', test=False, name='test'):
     _, _, new_img = model(source, style)
     pred = Image.fromarray(np.array(new_img[0]), 'RGB')
 
     if test:
-        pred.save(os.path.join('pred' + name, 'test.png'))
+        if not os.path.isdir(os.path.join('pred' + name)):
+            try:
+                os.mkdir(os.path.join('pred' + name))
+                pred.save(os.path.join('pred' + name, 'test.png'))
+            except Exception:
+                print('Unable to create prediction directory. See "utils.py" for more information.')
+        else:
+            pred.save(os.path.join('pred' + name, 'test.png'))
+
         plt.figure(figsize=(6, 6))
 
         plt.subplot(3, 2, 1)
@@ -48,13 +56,21 @@ def test_model(model, source, style, num='0', test=False, name='test'):
         plt.grid(False)
 
         plt.subplot(3, 1, 3)
-        indices = [i for i in range(len(model.loss_content))]
-        plt.plot(indices, model.loss_content, label='Content', color='blue')
-        plt.plot(indices, model.loss_style, label='Style', color='green')
-        plt.plot(indices, model.loss_identity, label='Identity', color='red')
+        indices = [i for i in range(len(model.loss[model.loss.keys[0]]))]
+        for label in model.loss.keys:
+            plt.plot(indices, model.loss[label], label=label)
         plt.legend()
         plt.grid(False)
 
         plt.show()
     else:
         pred.save(os.path.join('pred' + name, 'epoch_' + str(num) + '.png'))
+
+
+class Sampling(tf.keras.layers.Layer):
+    def call(self, inputs):
+        z_mean, z_log_var = inputs
+        batch = tf.shape(z_mean)[0]
+        dim = tf.shape(z_mean)[1]
+        epsilon = tf.keras.backend.random_normal(shape=(batch, dim))
+        return z_mean + tf.exp(0.5 * z_log_var) * epsilon

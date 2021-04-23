@@ -21,10 +21,11 @@ style_lr = 1
 identity_lr = 2
 num_epochs = 200
 num_filters = 12
-batch_size = 16
+batch_size = 32
 learning_rate = 2e-3
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+model_name='V2'
 
 
 def lrelu_bn(inputs):
@@ -102,6 +103,7 @@ class AE_A(tf.keras.Model):
         self.loss_content = []
         self.loss_style = []
         self.loss_identity = []
+        self.loss = {'Identity': self.loss_identity, 'Content': self.loss_content, 'Style': self.loss_style}
 
     def save(self, fname):
         dir = os.getcwd() + '\\'
@@ -163,10 +165,10 @@ class AE_A(tf.keras.Model):
             duration = time.time() - start
             print(int(duration / 60), "minutes &", int(duration % 60), "seconds, for epoch", i)
             if i % 20 == 0:
-                utils.test_model(self, source, style, i)
+                utils.test_model(self, source, style, num=i, name=model_name)
             print('\n')
             image_dataset, _ = utils.create_dataset()
-            self.save("test")
+            self.save(fname)
             time.sleep(1)
         print('Training completed in', int((time.time() - start_time) / 60), "minutes &", int(duration % 60), "seconds")
 
@@ -188,13 +190,13 @@ class AE_A(tf.keras.Model):
     def build_graph(self):
         source = Input(shape=(256, 256, 3))
         style = Input(shape=(256, 256, 3))
-        return tf.keras.Model(inputs=[source, style], outputs=self.call(source, style), name='system')
+        return tf.keras.Model(inputs=[source, style], outputs=self.call(source, style), name=model_name)
 
 
 model = AE_A()
-tf.keras.utils.plot_model(model.build_graph(), "V2.png", show_shapes=True, expand_nested=True)
-model.train_model('V2')
-model.load('V2')
+tf.keras.utils.plot_model(model.build_graph(), model_name+".png", show_shapes=True, expand_nested=True)
+model.train_model(model_name)
+model.load(model_name)
 image_dataset, _ = utils.create_dataset()
 
 for source, style in zip(image_dataset.take(1), image_dataset.take(1)):

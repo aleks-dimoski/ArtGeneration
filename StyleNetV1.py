@@ -102,6 +102,7 @@ class AE_A(tf.keras.Model):
         self.loss_content = []
         self.loss_style = []
         self.loss_identity = []
+        self.loss = {'Identity': self.loss_identity, 'Content': self.loss_content, 'Style': self.loss_style}
 
     def save(self, fname):
         dir = os.getcwd() + '\\'
@@ -161,10 +162,10 @@ class AE_A(tf.keras.Model):
             duration = time.time()-start
             print(int(duration/60), "minutes &", int(duration % 60), "seconds, for epoch", i)
             if i % 20 == 0:
-                utils.test_model(self, source, style, i)
+                utils.test_model(self, source, style, num=i, name=model_name)
             print('\n')
             image_dataset, _ = utils.create_dataset()
-            self.save("test")
+            self.save(fname)
             time.sleep(1)
         print('Training completed in', int((time.time()-start_time) / 60), "minutes &", int(duration % 60), "seconds")
 
@@ -196,5 +197,5 @@ model.load(model_name)
 image_dataset, _ = utils.create_dataset()
 
 for source, style in zip(image_dataset.take(1), image_dataset.take(1)):
-    utils.test_model(model, source, style, num='test', last_test=True)
+    utils.test_model(model, source, style, test=True, name=model_name)
     break
