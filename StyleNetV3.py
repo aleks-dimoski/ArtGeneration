@@ -1,7 +1,5 @@
 import tensorflow as tf
-import tensorflow_addons as tfa
-import numpy as np
-import matplotlib.pyplot as plt
+import keract
 import os
 import time
 from tensorflow.python.keras.backend import set_session
@@ -17,14 +15,17 @@ sess = tf.compat.v1.InteractiveSession(config=tf.compat.v1.ConfigProto(gpu_optio
 set_session(sess)
 
 identity_lr = 1
-kl_lr = 1
+kl_lr = 0.06
 num_epochs = 200
-num_filters = 12
+num_filters = 27
 batch_size = 16
-learning_rate = 2e-3
+learning_rate = 1e-3
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-model_name='V3'
+model_name = 'V3'
+
+conv2DT = tf.keras.layers.Conv2DTranspose
+conv2D = tf.keras.layers.Conv2D
 
 
 def lrelu_bn(inputs):
@@ -33,69 +34,76 @@ def lrelu_bn(inputs):
     return bn
 
 
-def vae(name):
-    conv2DT = tf.keras.layers.Conv2DTranspose
-    conv2D = tf.keras.layers.Conv2D
+def enc_unit(inp, filter_mult=1, name='enc'):
+    x = conv2D(num_filters*filter_mult, kernel_size=(3, 3), strides=(2, 2), padding='same')(inp)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = conv2D(num_filters*filter_mult*2, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    return tf.keras.Model(inputs=inp, outputs=x, name=name)
 
-    inp = tf.keras.Input(shape=(256, 256, 3))
 
-    # Encoder #
-    x = conv2D(6, kernel_size=(3, 3), strides=(2, 2), padding='same')(inp)
+def dec_unit(inp, filter_mult=1, name='dec', last=False):
+    x = conv2DT(num_filters * filter_mult*2, (3, 3), strides=(2, 2), padding='same')(inp)
     x = tf.keras.layers.LeakyReLU()(x)
-    x2 = conv2D(num_filters, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x2)
-    x = conv2D(num_filters * 2, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
-    x1 = conv2D(num_filters * 4, kernel_size=(3, 3), strides=(2, 2), padding='same', name='skip_con')(x)
-    x = tf.keras.layers.LeakyReLU()(x1)
-    x = conv2D(num_filters * 8, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
-    x = conv2D(num_filters * 16, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
-    x = conv2D(num_filters * 32, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
+    if not last:
+        x = conv2DT(num_filters * filter_mult, (3, 3), strides=(2, 2), padding='same')(x)
+        x = tf.keras.layers.LeakyReLU()(x)
+    else:
+        x = conv2DT(3, (3, 3), strides=(2, 2), padding='same', activation='sigmoid')(x)
 
-    # Latent Space #
-    x = tf.keras.layers.Flatten()(x)
-    w = tf.keras.layers.Dense(256, activation='relu')(x)
-    w_mean = tf.keras.layers.Dense(128, name='w_mean')(w)
-    w_log_var = tf.keras.layers.Dense(128, name='w_log_var')(w)
+    return tf.keras.Model(inputs=inp, outputs=x, name=name)
+
+
+def latent(inp, latent_dims=128, name='latent'):
+    x = tf.keras.layers.Flatten()(inp)
+    w = tf.keras.layers.Dense(latent_dims, activation='relu')(x)
+    w_mean = tf.keras.layers.Dense(latent_dims, name='w_mean')(w)
+    w_log_var = tf.keras.layers.Dense(latent_dims, name='w_log_var')(w)
     w = utils.Sampling()([w_mean, w_log_var])
+    return tf.keras.Model(inputs=inp, outputs=[w, w_mean, w_log_var], name=name)
 
-    # Decoder #
-    z = tf.keras.Input(shape=(128,))
-    x = tf.keras.layers.Dense(2 * 2 * 32 * num_filters, activation='relu')(z)
-    x = tf.keras.layers.Reshape((2, 2, num_filters*32))(x)
 
-    x = conv2DT(num_filters * 16, (3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
-    x = conv2DT(num_filters * 8, (3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
-    x = conv2DT(num_filters * 4, (3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.Add()([x, x1])
-    x = lrelu_bn(x)
-    x = conv2DT(num_filters * 2, (3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
-    x = conv2DT(num_filters, (3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.Add()([x, x2])
-    x = lrelu_bn(x)
-    x = conv2DT(9, (3, 3), strides=(2, 2), padding='same')(x)
-    x = tf.keras.layers.LeakyReLU()(x)
-    y = conv2DT(3, (3, 3), strides=(2, 2), padding='same', activation='sigmoid')(x)
-
-    encoder = tf.keras.models.Model(inputs=inp, outputs=[w, w_mean, w_log_var, x1, x2], name='encoder')
-    decoder = tf.keras.models.Model(inputs=z, outputs=y, name='decoder')
-    return encoder, decoder
+def reshape_latent(inp, name='reshape_latent'):
+    x = tf.keras.layers.Dense(4 * 4 * 32 * num_filters, activation='relu')(inp)
+    x = tf.keras.layers.Reshape((4, 4, num_filters * 32))(x)
+    return tf.keras.Model(inputs=inp, outputs=x, name=name)
 
 
 class AE_A(tf.keras.Model):
     def __init__(self):
         super(AE_A, self).__init__()
-        self.enc, self.dec = vae('V3')
         self.compile(optimizer=optimizer)
         self.loss_identity = []
         self.kl_loss = []
         self.loss = {}
+
+        inp1 = tf.keras.Input(shape=(256, 256, 3))
+        print(inp1.get_shape())
+        self.enc1 = enc_unit(inp=inp1, filter_mult=1, name='E1')
+        print(self.enc1.output_shape)
+        inp2 = tf.keras.Input(shape=(64, 64, 54))
+        self.enc2 = enc_unit(inp=inp2, filter_mult=4, name='E2')
+        print(self.enc2.output_shape)
+        inp3 = tf.keras.Input(shape=(16, 16, 216))
+        self.enc3 = enc_unit(inp=inp3, filter_mult=16, name='E3')
+        print(self.enc3.output_shape)
+
+        inp_latent = tf.keras.Input(shape=(4, 4, 864))
+        self.latent1 = latent(inp=inp_latent)
+        print(self.latent1.output_shape[0])
+        inp_reshape = tf.keras.Input(shape=(128,))
+        self.reshape_l = reshape_latent(inp_reshape)
+        print(self.reshape_l.output_shape)
+
+        out3 = tf.keras.Input(shape=(4, 4, 864))
+        self.dec3 = dec_unit(inp=out3, filter_mult=8, name='D3')
+        print(self.dec3.output_shape)
+        out2 = tf.keras.Input(shape=(16, 16, 216))
+        self.dec2 = dec_unit(inp=out2, filter_mult=2, name='D2')
+        print(self.dec2.output_shape)
+        out1 = tf.keras.Input(shape=(64, 64, 54))
+        self.dec1 = dec_unit(inp=out1, last=True, filter_mult=1, name='D1')
+        print(self.dec1.output_shape)
 
     def save(self, fname):
         dir = os.getcwd() + '\\'
@@ -104,27 +112,60 @@ class AE_A(tf.keras.Model):
                 os.mkdir(dir + fname)
             except OSError:
                 print("File save failed.")
-        tf.keras.models.save_model(model=self.enc, filepath=dir + fname + '\encoder')
-        tf.keras.models.save_model(model=self.dec, filepath=dir + fname + '\decoder')
+        tf.keras.models.save_model(model=self.enc1, filepath=dir + fname + '\\' + self.enc1.name)
+        tf.keras.models.save_model(model=self.enc2, filepath=dir + fname + '\\' + self.enc2.name)
+        tf.keras.models.save_model(model=self.enc3, filepath=dir + fname + '\\' + self.enc3.name)
+        tf.keras.models.save_model(model=self.dec3, filepath=dir + fname + '\\' + self.dec3.name)
+        tf.keras.models.save_model(model=self.dec2, filepath=dir + fname + '\\' + self.dec2.name)
+        tf.keras.models.save_model(model=self.dec1, filepath=dir + fname + '\\' + self.dec1.name)
 
     def load(self, fname):
         dir = os.getcwd() + '\\'
-        self.enc = tf.keras.models.load_model(dir + fname + '\encoder')
-        self.dec = tf.keras.models.load_model(dir + fname + '\decoder')
+        self.enc1 = tf.keras.models.load_model(dir + fname + '\\' + self.enc1.name)
+        self.enc2 = tf.keras.models.load_model(dir + fname + '\\' + self.enc2.name)
+        self.enc3 = tf.keras.models.load_model(dir + fname + '\\' + self.enc3.name)
+        self.dec3 = tf.keras.models.load_model(dir + fname + '\\' + self.dec3.name)
+        self.dec2 = tf.keras.models.load_model(dir + fname + '\\' + self.dec2.name)
+        self.dec1 = tf.keras.models.load_model(dir + fname + '\\' + self.dec1.name)
 
     def call(self, x):
-        w = self.enc(x)
-        y = self.dec(w[0], w[2], w[3])
-        return y
-
-    def decode(self, w):
-        return self.dec(w)
+        x1 = self.enc1(x)
+        x2 = self.enc2(x1)
+        x3 = self.enc3(x2)
+        w = self.latent1(x3)[0]
+        w = self.reshape_l(w)
+        y3 = self.dec3(w)
+        y3 = tf.keras.layers.Add()([x2, y3])
+        y3 = lrelu_bn(y3)
+        y2 = self.dec2(y3)
+        y2 = tf.keras.layers.Add()([x1, y2])
+        y2 = lrelu_bn(y2)
+        y1 = self.dec1(y2)
+        return y1
 
     def encode(self, x):
-        return self.enc(x)
+        x1 = self.enc1(x)
+        x2 = self.enc2(x1)
+        x3 = self.enc3(x2)
+        w_hold = self.latent1(x3)
+        w = w_hold[0]
+        w_mean = w_hold[1]
+        w_log_var = w_hold[2]
+        return w, w_mean, w_log_var
+
+    def decode(self, w, x1, x2):
+        w = self.reshape_l(w)
+        y3 = self.dec3(w)
+        y3 = tf.keras.layers.Add()([x2, y3])
+        y3 = lrelu_bn(y3)
+        y2 = self.dec2(y3)
+        y2 = tf.keras.layers.Add()([x1, y2])
+        y2 = lrelu_bn(y2)
+        y1 = self.dec1(y2)
+        return y1
 
     def train_model(self, fname=None):
-        time.sleep(5)
+        time.sleep(1)
         try:
             self.load(fname)
             print("File load successful.")
@@ -146,7 +187,7 @@ class AE_A(tf.keras.Model):
             for source in zip(image_dataset.take(int(dataset_size / 4))):
                 try:
                     loss_identity, kl_loss = self.train_step(source, optimizer)
-                    if batch_on % 10 == 0:
+                    if batch_on % 50 == 0:
                         print("Beginning batch #" + str(batch_on), 'out of', int(dataset_size / 4), 'of size',
                               batch_size)
                         self.loss_identity += [loss_identity]
@@ -159,17 +200,22 @@ class AE_A(tf.keras.Model):
             if i % 20 == 0:
                 self.loss = {'Identity': self.loss_identity, 'KL': self.kl_loss}
                 utils.test_model(self, source, num=i, name=model_name)
+            if i % 50 == 0:
+                self.loss = {'Identity': self.loss_identity, 'KL': self.kl_loss}
+                utils.test_model(self, source, test=True, name=model_name)
+                act = keract.get_activations(self, source)
+                keract.display_activations(act)
             print('\n')
             image_dataset, _ = utils.create_dataset()
             self.save(fname)
-            time.sleep(1)
+            time.sleep(0.1)
         print('Training completed in', int((time.time() - start_time) / 60), "minutes &", int(duration % 60), "seconds")
 
     def train_step(self, source, optimizer):
         with tf.GradientTape() as tape:
             w, w_mean, w_log_var = self.encode(source)
             prediction = self(source)
-            loss_identity = tf.abs(identity_lr * tf.reduce_mean((source - prediction) ** 2))
+            loss_identity = tf.abs(identity_lr * cross_entropy(source[0], prediction))
             kl_loss = -0.5 * (1 + w_log_var - tf.square(w_mean) - tf.exp(w_log_var))
             kl_loss = kl_lr * tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1))
             loss = loss_identity + kl_loss

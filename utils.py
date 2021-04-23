@@ -27,27 +27,28 @@ def create_dataset(batch_size=4):
 
 
 def test_model(model, source=None, style=None, num='0', test=False, name='test'):
-    _, _, new_img = model(source, style)
+    try:
+        _, _, new_img = model(source, style)
+    except Exception:
+        new_img = model(source)
+        style = np.ones_like(source)
+
     pred = Image.fromarray(np.array(new_img[0]), 'RGB')
 
+    if not os.path.isdir(os.path.join('pred' + name)):
+        os.mkdir(os.path.join('pred' + name))
+
     if test:
-        if not os.path.isdir(os.path.join('pred' + name)):
-            try:
-                os.mkdir(os.path.join('pred' + name))
-                pred.save(os.path.join('pred' + name, 'test.png'))
-            except Exception:
-                print('Unable to create prediction directory. See "utils.py" for more information.')
-        else:
-            pred.save(os.path.join('pred' + name, 'test.png'))
+        pred.save(os.path.join('pred' + name, 'test.png'))
 
         plt.figure(figsize=(6, 6))
 
         plt.subplot(3, 2, 1)
-        plt.imshow(source[0])
+        plt.imshow(source[0][0])
         plt.grid(False)
 
         plt.subplot(3, 2, 2)
-        plt.imshow(style[0])
+        plt.imshow(style[0][0])
         plt.grid(False)
 
         plt.subplot(3, 1, 2)
@@ -56,8 +57,8 @@ def test_model(model, source=None, style=None, num='0', test=False, name='test')
         plt.grid(False)
 
         plt.subplot(3, 1, 3)
-        indices = [i for i in range(len(model.loss[model.loss.keys[0]]))]
-        for label in model.loss.keys:
+        indices = [i for i in range(len(model.loss[next(iter(model.loss.keys()))]))]
+        for label in model.loss.keys():
             plt.plot(indices, model.loss[label], label=label)
         plt.legend()
         plt.grid(False)
