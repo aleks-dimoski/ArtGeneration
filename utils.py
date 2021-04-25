@@ -68,6 +68,11 @@ def test_model(model, source=None, style=None, num='0', test=False, name='test')
         pred.save(os.path.join('pred' + name, 'epoch_' + str(num) + '.png'))
 
 
+def record_steps(num=0):
+    num -= num % 4
+    return num/4
+
+
 class Sampling(tf.keras.layers.Layer):
     def call(self, inputs):
         z_mean, z_log_var = inputs
