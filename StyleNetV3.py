@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tensorflow_addons as tfa
 import numpy as np
 import os
 import time
@@ -19,7 +20,7 @@ kl_lr = .1
 num_epochs = 200
 num_filters = 6
 batch_size = 4
-learning_rate = 1e-4
+learning_rate = 2e-4
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 model_name = 'V3'
@@ -34,9 +35,13 @@ def lrelu_bn(inputs):
     return bn
 
 
-def enc_unit(inp, filter_mult=1, name='enc'):
-    x = conv2D(num_filters*filter_mult, kernel_size=(3, 3), strides=(2, 2), padding='same')(inp)
-    # x = tf.keras.layers.LeakyReLU()(x)
+def enc_unit(inp, filter_mult=1, name='enc', first=False):
+    if not first:
+        x = conv2D(num_filters*filter_mult, kernel_size=(3, 3), strides=(2, 2), padding='same')(inp)
+    else:
+        x = conv2D(num_filters*filter_mult, kernel_size=(7, 7), strides=(2, 2), padding='same')(inp)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = tfa.layers.InstanceNormalization()(x)
     x = conv2D(num_filters*filter_mult*2, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
     x = tf.keras.layers.LeakyReLU()(x)
     return tf.keras.Model(inputs=inp, outputs=x, name=name)
@@ -46,7 +51,7 @@ def dec_unit(inp, filter_mult=1, name='dec', last=False):
     x = conv2DT(num_filters * filter_mult*2, (3, 3), strides=(2, 2), padding='same')(inp)
     x = tf.keras.layers.LeakyReLU()(x)
     if not last:
-        x = conv2DT(num_filters * filter_mult, (3, 3), strides=(2, 2), padding='same')(x)
+        x = conv2DT(num_filters * filter_mult, (7, 7), strides=(2, 2), padding='same')(x)
         x = tf.keras.layers.LeakyReLU()(x)
     else:
         x = conv2DT(3, (3, 3), strides=(2, 2), padding='same', activation='sigmoid')(x)
@@ -241,7 +246,7 @@ class AE_A(tf.keras.Model):
             loss_identity = identity_lr * tf.reduce_mean(tf.reduce_sum(cross_entropy(source[0], prediction))) #+ 0.1 * tf.reduce_mean((source[0]-prediction)**2))
             kl_loss = -0.5 * (1 + w_log_var - tf.square(w_mean) - tf.exp(w_log_var))
             kl_loss = kl_lr * tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1))
-            loss = loss_identity + kl_loss
+            loss = (loss_identity + kl_loss) * learning_rate
 
         grads = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
