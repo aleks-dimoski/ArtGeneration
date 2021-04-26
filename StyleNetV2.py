@@ -129,6 +129,9 @@ class AE_A(tf.keras.Model):
         decoded = self.decoder([encoded, source_encoded[1], source_encoded[2]])
         return source_encoded, style_encoded, decoded
 
+    def merge(self, source, style):
+        return self(source, style)
+
     def train_model(self, fname=None):
         time.sleep(5)
         try:
