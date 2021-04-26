@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 import os
+from scipy import stats
 
 
 def create_dataset(batch_size=4):
@@ -28,11 +29,13 @@ def create_dataset(batch_size=4):
 
 def test_model(model, source=None, style=None, num='0', test=False, name='test'):
     try:
-        _, _, new_img = model(source, style)
+        _, _, new_img = model(source[0], style)
     except Exception:
-        new_img = model(source)
-        style = np.ones_like(source)
+        new_img = model(np.reshape(source[0][0], (1, 256, 256, 3)))
+        style = np.ones_like(source[0])
 
+    new_img = np.array(new_img) * 255.
+    new_img = new_img.astype(np.uint8)
     pred = Image.fromarray(np.array(new_img[0]), 'RGB')
 
     if not os.path.isdir(os.path.join('pred' + name)):
@@ -48,12 +51,12 @@ def test_model(model, source=None, style=None, num='0', test=False, name='test')
         plt.grid(False)
 
         plt.subplot(3, 2, 2)
-        plt.imshow(style[0][0])
+        plt.imshow(pred)
         plt.grid(False)
 
         plt.subplot(3, 1, 2)
 
-        plt.imshow(pred)
+        plt.imshow(np.array(new_img[0]))
         plt.grid(False)
 
         plt.subplot(3, 1, 3)

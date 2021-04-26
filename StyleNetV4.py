@@ -18,8 +18,8 @@ set_session(sess)
 identity_lr = 1
 kl_lr = .1
 num_epochs = 200
-num_filters = 4
-batch_size = 6
+num_filters = 3
+batch_size = 12
 learning_rate = 2e-4
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -145,6 +145,8 @@ class AE_A(tf.keras.Model):
         tf.keras.models.save_model(model=self.enc2, filepath=dr + fname + '\\' + self.enc2.name)
         tf.keras.models.save_model(model=self.enc3, filepath=dr + fname + '\\' + self.enc3.name)
         tf.keras.models.save_model(model=self.enc4, filepath=dr + fname + '\\' + self.enc4.name)
+        tf.keras.models.save_model(model=self.latent1, filepath=dr + fname + '\\' + self.latent1.name)
+        tf.keras.models.save_model(model=self.reshape_l, filepath=dr + fname + '\\' + self.reshape_l.name)
         tf.keras.models.save_model(model=self.dec4, filepath=dr + fname + '\\' + self.dec4.name)
         tf.keras.models.save_model(model=self.dec3, filepath=dr + fname + '\\' + self.dec3.name)
         tf.keras.models.save_model(model=self.dec2, filepath=dr + fname + '\\' + self.dec2.name)
@@ -156,6 +158,8 @@ class AE_A(tf.keras.Model):
         self.enc2 = tf.keras.models.load_model(dr + fname + '\\' + self.enc2.name)
         self.enc3 = tf.keras.models.load_model(dr + fname + '\\' + self.enc3.name)
         self.enc4 = tf.keras.models.load_model(dr + fname + '\\' + self.enc4.name)
+        self.latent1 = tf.keras.models.load_model(dr + fname + '\\' + self.latent1.name)
+        self.reshape_l = tf.keras.models.load_model(dr + fname + '\\' + self.reshape_l.name)
         self.dec4 = tf.keras.models.load_model(dr + fname + '\\' + self.dec4.name)
         self.dec3 = tf.keras.models.load_model(dr + fname + '\\' + self.dec3.name)
         self.dec2 = tf.keras.models.load_model(dr + fname + '\\' + self.dec2.name)
@@ -244,7 +248,7 @@ class AE_A(tf.keras.Model):
                 self.loss['Identity'] = self.loss_identity
                 self.loss['KL'] = self.kl_loss
                 utils.test_model(self, source, num=i, name=model_name)
-            if i % 190 == 0:
+            if i % 10 == 0:
                 self.loss['Identity'] = self.loss_identity
                 self.loss['KL'] = self.kl_loss
                 utils.test_model(self, source, test=True, name=model_name)
