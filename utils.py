@@ -9,15 +9,16 @@ from scipy import stats
 def create_dataset(batch_size=4):
     dgen_params = dict(
         rescale=1. / 255,
-        shear_range=0.0,
-        zoom_range=0.0,
+        shear_range=0.06,
+        zoom_range=0.06,
         horizontal_flip=True,
-        brightness_range=(0.7, 1.2),
+        brightness_range=(0.9, 1.1),
     )
     gen_params = dict(
         batch_size=batch_size,
         color_mode='rgb',
-        class_mode=None
+        class_mode=None,
+        #steps_per_epoch
     )
     image_dgen = tf.keras.preprocessing.image.ImageDataGenerator(**dgen_params)
     image_gen = image_dgen.flow_from_directory('D:\Storage\Technical\Linux Resources\Images\ArtGen', **gen_params)

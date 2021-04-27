@@ -18,21 +18,15 @@ set_session(sess)
 identity_lr = 1
 kl_lr = .1
 num_epochs = 200
-num_filters = 3
-batch_size = 8
+num_filters = 4
+batch_size = 6
 learning_rate = 2e-4
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-model_name = 'V4'
+model_name = 'V5'
 
 conv2DT = tf.keras.layers.Conv2DTranspose
 conv2D = tf.keras.layers.Conv2D
-
-
-def lrelu_bn(inputs):
-    #lrelu = tf.keras.layers.LeakyReLU()(inputs)
-    bn = tf.keras.layers.BatchNormalization()(inputs)
-    return bn
 
 
 def enc_unit(inp, filter_mult=1, name='enc', first=False):
@@ -44,7 +38,6 @@ def enc_unit(inp, filter_mult=1, name='enc', first=False):
 
     x = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(1, 1), padding='same')(inp)
     x = tfa.layers.InstanceNormalization()(x)
-    x = tf.keras.layers.LeakyReLU()(x)
     x = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
     x = tfa.layers.InstanceNormalization()(x)
 
@@ -52,14 +45,13 @@ def enc_unit(inp, filter_mult=1, name='enc', first=False):
     x = tf.keras.layers.Add()([x, x1])
     x2 = tf.keras.layers.LeakyReLU()(x)
 
-    x = conv2D(num_filters * filter_mult * 2, kernel_size=(3, 3), strides=(1, 1), padding='same')(x2)
+    x = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(1, 1), padding='same')(x2)
     x = tfa.layers.InstanceNormalization()(x)
-    x = tf.keras.layers.LeakyReLU()(x)
-    x = conv2D(num_filters * filter_mult * 2, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
+    x = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
     x = tfa.layers.InstanceNormalization()(x)
 
-    x2 = conv2D(num_filters * filter_mult * 2, kernel_size=(1, 1), strides=(2, 2), padding='same')(x1)
-    x = tf.keras.layers.Add()([x, x2])
+    x2 = conv2D(num_filters * filter_mult, kernel_size=(1, 1), strides=(2, 2), padding='same')(x1)
+    x = tf.keras.layers.Concatenate()([x, x2])
     x = tf.keras.layers.LeakyReLU()(x)
 
     return tf.keras.Model(inputs=inp, outputs=x, name=name)
@@ -67,7 +59,6 @@ def enc_unit(inp, filter_mult=1, name='enc', first=False):
 
 def dec_unit(inp, filter_mult=1, name='dec', last=False):
     x = conv2DT(num_filters * filter_mult*2, (3, 3), strides=(2, 2), padding='same')(inp)
-    x = tf.keras.layers.LeakyReLU()(x)
     if not last:
         x = conv2DT(num_filters * filter_mult, (3, 3), strides=(2, 2), padding='same')(x)
         x = tf.keras.layers.LeakyReLU()(x)
@@ -79,6 +70,7 @@ def dec_unit(inp, filter_mult=1, name='dec', last=False):
 
 def latent(inp, latent_dims=128, name='latent'):
     x = tf.keras.layers.Flatten()(inp)
+    x = tf.keras.layers.Dropout(0.2)(x)
     w = tf.keras.layers.Dense(latent_dims, activation='relu')(x)
     w_mean = tf.keras.layers.Dense(latent_dims, name='w_mean')(w)
     w_log_var = tf.keras.layers.Dense(latent_dims, name='w_log_var')(w)
@@ -116,19 +108,19 @@ class AE_A(tf.keras.Model):
         print(self.enc4.output_shape)
 
         inp_latent = tf.keras.Input(shape=(1, 1, 4*4*4*4*num_filters))
-        self.latent1 = latent(inp=inp_latent, latent_dims=256)
+        self.latent1 = latent(inp=inp_latent, latent_dims=420)
         print(self.latent1.output_shape[0])
-        inp_reshape = tf.keras.Input(shape=(256,))
+        inp_reshape = tf.keras.Input(shape=(420,))
         self.reshape_l = reshape_latent(inp_reshape, out_shape=(1, 1, 4*4*4*4*num_filters))
         print(self.reshape_l.output_shape)
 
         out4 = tf.keras.Input(shape=(1, 1, 4*4*4*4*num_filters))
         self.dec4 = dec_unit(inp=out4, filter_mult=64, name='D4')
         print(self.dec4.output_shape)
-        out3 = tf.keras.Input(shape=(4, 4, 4*4*4*num_filters))
+        out3 = tf.keras.Input(shape=(4, 4, 8*4*4*num_filters))
         self.dec3 = dec_unit(inp=out3, filter_mult=16, name='D3')
         print(self.dec3.output_shape)
-        out2 = tf.keras.Input(shape=(16, 16, 4*4*num_filters))
+        out2 = tf.keras.Input(shape=(16, 16, 8*4*num_filters))
         self.dec2 = dec_unit(inp=out2, filter_mult=4, name='D2')
         print(self.dec2.output_shape)
         out1 = tf.keras.Input(shape=(64, 64, 4*num_filters))
@@ -175,12 +167,33 @@ class AE_A(tf.keras.Model):
         w = self.latent1(x4)[0]
         w = self.reshape_l(w)
         y4 = self.dec4(w)
-        y4 = tf.keras.layers.Add()([x3, y4])
-        y4 = lrelu_bn(y4)
+        y4 = tf.keras.layers.Concatenate()([x3, y4])
+        y4 = tf.keras.layers.BatchNormalization()(y4)
         y3 = self.dec3(y4)
-        #y3 = tf.keras.layers.Add()([x2, y3])
-        #y3 = lrelu_bn(y3)
+        y3 = tf.keras.layers.Concatenate()([x2, y3])
+        y3 = tf.keras.layers.BatchNormalization()(y3)
         y2 = self.dec2(y3)
+        #y2 = tf.keras.layers.Concatenate()([x1, y2])
+        #y2 = tf.keras.layers.BatchNormalization()(y2)
+        y1 = self.dec1(y2)
+        return y1
+
+    def call_latent(self, x):
+        x1 = self.enc1(x)
+        x2 = self.enc2(x1)
+        x3 = self.enc3(x2)
+        x4 = self.enc4(x3)
+        w = self.latent1(x4)[0]
+        w = self.reshape_l(w)
+        y4 = self.dec4(w)
+        y4 = tf.keras.layers.Concatenate()([y4, y4])
+        y4 = tf.keras.layers.BatchNormalization()(y4)
+        y3 = self.dec3(y4)
+        y3 = tf.keras.layers.Concatenate()([y3, y3])
+        y3 = tf.keras.layers.BatchNormalization()(y3)
+        y2 = self.dec2(y3)
+        #y2 = tf.keras.layers.Concatenate()([y2, y2])
+        #y2 = tf.keras.layers.BatchNormalization()(y2)
         y1 = self.dec1(y2)
         return y1
 
@@ -198,16 +211,18 @@ class AE_A(tf.keras.Model):
     def decode(self, w, x3, x2, x1):
         w = self.reshape_l(w)
         y4 = self.dec4(w)
-        y4 = tf.keras.layers.Add()([x3, y4])
-        y4 = lrelu_bn(y4)
+        y4 = tf.keras.layers.Concatenate()([x3, y4])
+        y4 = tf.keras.layers.BatchNormalization()(y4)
         y3 = self.dec3(y4)
-        #y3 = tf.keras.layers.Add()([x2, y3])
-        #y3 = lrelu_bn(y3)
+        y3 = tf.keras.layers.Concatenate()([x2, y3])
+        y3 = tf.keras.layers.BatchNormalization()(y3)
         y2 = self.dec2(y3)
+        #y2 = tf.keras.layers.Concatenate()([x1, y2])
+        #y2 = tf.keras.layers.BatchNormalization()(y2)
         y1 = self.dec1(y2)
         return y1
 
-    def merge(self, source, style, slice=1):
+    def merge(self, source, style, slice=2):
         w, _, _, _, x3, x2, x1 = self.encode(source)
         source = [w, x3, x2, x1]
         w, _, _, _, x3, x2, x1 = self.encode(style)
@@ -253,7 +268,7 @@ class AE_A(tf.keras.Model):
                 self.loss['Identity'] = self.loss_identity
                 self.loss['KL'] = self.kl_loss
                 utils.test_model(self, source, num=i, name=model_name)
-            if i % 10 == 0:
+            if i % 190 == 0:
                 self.loss['Identity'] = self.loss_identity
                 self.loss['KL'] = self.kl_loss
                 utils.test_model(self, source, test=True, name=model_name)
@@ -273,7 +288,12 @@ class AE_A(tf.keras.Model):
         with tf.GradientTape() as tape:
             w, w_mean, w_log_var, _, _, _, _ = self.encode(source)
             prediction = self(source[0])
-            loss_identity = identity_lr * learning_rate * (0.2 * tf.reduce_mean(tf.reduce_sum(cross_entropy(source[0], prediction))) + tf.reduce_mean(tf.reduce_sum((source[0]-prediction)**2)))
+            prediction_latent = self.call_latent(source[0])
+            loss_identity = identity_lr * learning_rate * (
+                            0.2 * tf.reduce_mean(tf.reduce_sum(cross_entropy(source[0], prediction)))
+                            + tf.reduce_mean(tf.reduce_sum((source[0]-prediction)**2))
+                            + 0.2 * tf.reduce_mean(tf.reduce_sum(cross_entropy(source[0], prediction_latent)))
+                            + tf.reduce_mean(tf.reduce_sum((source[0]-prediction_latent)**2)))
             kl_loss = -0.5 * (1 + w_log_var - tf.square(w_mean) - tf.exp(w_log_var))
             kl_loss = kl_lr * tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1)) * learning_rate
             loss = (loss_identity + kl_loss)
