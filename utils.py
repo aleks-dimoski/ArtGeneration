@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 import os
+import datetime
 from scipy import stats
 
 
@@ -26,6 +27,25 @@ def create_dataset(batch_size=4):
                                                    output_signature=tf.TensorSpec(shape=(None, 256, 256, 3),
                                                                                   dtype=tf.float32))
     return image_dataset, len(image_gen)
+
+
+def get_size(tsr):
+    try:
+        tsr = tsr.get_shape().as_list()
+    except Exception:
+        pass
+    prod = 1
+    for i in tsr:
+        if not i == None:
+            prod *= i
+    return prod
+
+
+def print_time_remaining(cur_epoch, tot_epochs, time_taken):
+    remaining = tot_epochs - cur_epoch
+    print(f'Time taken for Epoch {cur_epoch} is {str(datetime.timedelta(seconds=time_taken))}')
+    print("Estimated time remaining is", str(datetime.timedelta(seconds=time_taken*remaining)))
+
 
 
 def test_model(model, source=None, style=None, num='0', test=False, name='test'):
@@ -79,8 +99,10 @@ def test_model(model, source=None, style=None, num='0', test=False, name='test')
 
 
 def record_steps(num=0):
+    num -= num % 8
+    num -= num / 8
     num -= num % 4
-    return num/4
+    return num / 4
 
 
 class Sampling(tf.keras.layers.Layer):
