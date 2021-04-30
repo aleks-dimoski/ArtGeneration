@@ -43,7 +43,7 @@ def get_size(tsr):
 
 def print_time_remaining(cur_epoch, tot_epochs, time_taken):
     remaining = tot_epochs - cur_epoch
-    print(f'Time taken for Epoch {cur_epoch} is {str(datetime.timedelta(seconds=time_taken))}')
+    print(f'Time taken for epoch {cur_epoch} is {str(datetime.timedelta(seconds=time_taken))}')
     print("Estimated time remaining is", str(datetime.timedelta(seconds=time_taken*remaining)))
 
 

@@ -18,8 +18,8 @@ set_session(sess)
 identity_lr = 1
 kl_lr = .5
 num_epochs = 200
-num_filters = 3
-batch_size = 6
+num_filters = 4
+batch_size = 12
 learning_rate = 2e-4
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -63,17 +63,22 @@ def enc_unit(inp, filter_mult=1, name='enc', first=False):
     return tf.keras.Model(inputs=inp, outputs=x, name=name)
 
 
-def dec_unit(inp, filter_mult=1, name='dec', last=False):
+def dec_unit(inp, filter_mult=1, name='dec', last=False, first=False):
     #x = conv2DT(num_filters * filter_mult*2, (3, 3), strides=(2, 2), padding='same')(inp)
-    if not last:
-        x = conv2DT(num_filters * filter_mult, (1, 1), strides=(2, 2), padding='same')(inp)
+    if first and not last:
+        x = conv2DT(num_filters * filter_mult, (1, 1), strides=(1, 1), padding='same')(inp)
+        x = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='nearest')(x)
         x = tf.keras.layers.LeakyReLU()(x)
+        return tf.keras.Model(inputs=inp, outputs=x, name=name)
+    if not last:
+        x = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='nearest')(inp)
+        x = conv2DT(num_filters * filter_mult, (3, 3), strides=(1, 1), padding='same')(x)
+        return tf.keras.Model(inputs=inp, outputs=x, name=name)
     else:
-        x = conv2DT(num_filters * filter_mult, (1, 1), strides=(2, 2), padding='same')(inp)
+        x = conv2DT(64, (1, 1), strides=(2, 2), padding='same')(inp)
         x = tf.keras.layers.LeakyReLU()(x)
         x = conv2DT(3, (7, 7), strides=(2, 2), padding='same', activation='sigmoid')(x)
-
-    return tf.keras.Model(inputs=inp, outputs=x, name=name)
+        return tf.keras.Model(inputs=inp, outputs=x, name=name)
 
 
 def latent_skip(x, latent_dims=16, name='latent_skip'):
@@ -89,8 +94,9 @@ def latent_skip(x, latent_dims=16, name='latent_skip'):
 
 
 def latent(inp, latent_dims=128, name='latent'):
-    x = tf.keras.layers.Flatten()(inp)
-    w = tf.keras.layers.Dense(latent_dims)(x)
+    x = tf.keras.layers.Conv2D(256, kernel_size=(3, 3), strides=(2, 2), padding='same')(inp)
+    w = tf.keras.layers.Flatten()(x)
+    w = tf.keras.layers.Dense(latent_dims)(w)
     w = tf.keras.layers.Dropout(0.4)(w)
     w_mean = tf.keras.layers.Dense(latent_dims, name='w_mean')(w)
     w_log_var = tf.keras.layers.Dense(latent_dims, name='w_log_var')(w)
@@ -102,7 +108,7 @@ def latent(inp, latent_dims=128, name='latent'):
 def reshape_latent(inp, out_shape, name='reshape_latent'):
     x = tf.keras.layers.Dense(utils.get_size(out_shape), activation='relu')(inp)
     x = tf.keras.layers.Reshape(out_shape)(x)
-    #x = conv2D(64*num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same')(x)
+    x = tf.keras.layers.Conv2D(40*num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same')(x)
     return tf.keras.Model(inputs=inp, outputs=x, name=name)
 
 
@@ -118,44 +124,44 @@ class AE_A(tf.keras.Model):
         print(inp1.get_shape())
         self.enc1 = enc_unit(inp=inp1, filter_mult=2, first=True, name='E1')
         print(self.enc1.output_shape)
-        inp2 = tf.keras.Input(shape=(64, 64, 8*num_filters))
+        inp2 = tf.keras.Input(shape=(self.enc1.output_shape[1:]))
         self.enc2 = enc_unit(inp=inp2, filter_mult=4, name='E2')
         print(self.enc2.output_shape)
-        inp3 = tf.keras.Input(shape=(32, 32, 16*num_filters))
-        self.enc3 = enc_unit(inp=inp3, filter_mult=8, name='E3')
+        inp3 = tf.keras.Input(shape=(self.enc2.output_shape[1:]))
+        self.enc3 = enc_unit(inp=inp3, filter_mult=6, name='E3')
         print(self.enc3.output_shape)
-        inp4 = tf.keras.Input(shape=(16, 16, 32*num_filters))
-        self.enc4 = enc_unit(inp=inp4, filter_mult=16, name='E4')
+        inp4 = tf.keras.Input(shape=(self.enc3.output_shape[1:]))
+        self.enc4 = enc_unit(inp=inp4, filter_mult=8, name='E4')
         print(self.enc4.output_shape)
-        inp5 = tf.keras.Input(shape=(8, 8, 64*num_filters))
-        self.enc5 = enc_unit(inp=inp5, filter_mult=32, name='E5')
+        inp5 = tf.keras.Input(shape=(self.enc4.output_shape[1:]))
+        self.enc5 = enc_unit(inp=inp5, filter_mult=10, name='E5')
         print(self.enc5.output_shape)
 
-        inp_latent = tf.keras.Input(shape=(4, 4, 128*num_filters))
-        self.latent1 = latent(inp=inp_latent, latent_dims=512*num_filters)
+        inp_latent = tf.keras.Input(shape=(self.enc5.output_shape[1:]))
+        self.latent1 = latent(inp=inp_latent, latent_dims=420*num_filters)
         print('latent', self.latent1.output_shape[0])
-        inp_reshape = tf.keras.Input(shape=(512*num_filters,))
-        self.reshape_l = reshape_latent(inp_reshape, out_shape=(4, 4, 128*num_filters))
+        inp_reshape = tf.keras.Input(shape=(420*num_filters))
+        self.reshape_l = reshape_latent(inp_reshape, out_shape=(self.enc5.output_shape[1:]))
         print(self.reshape_l.output_shape)
 
-        self.skip4 = latent_skip(inp5, latent_dims=256, name='latent_skip4')
-        self.skip3 = latent_skip(inp4, latent_dims=64, name='latent_skip3')
-        self.skip2 = latent_skip(inp3, latent_dims=32, name='latent_skip2')
-        self.skip1 = latent_skip(inp2, latent_dims=16, name='latent_skip1')
+        self.skip4 = latent_skip(inp5, latent_dims=32, name='latent_skip4')
+        self.skip3 = latent_skip(inp4, latent_dims=16, name='latent_skip3')
+        self.skip2 = latent_skip(inp3, latent_dims=8, name='latent_skip2')
+        self.skip1 = latent_skip(inp2, latent_dims=4, name='latent_skip1')
 
-        out5 = tf.keras.Input(shape=(4, 4, 128 * num_filters))
-        self.dec5 = dec_unit(inp=out5, filter_mult=64, name='D5')
+        out5 = tf.keras.Input(shape=(self.reshape_l.output_shape[1:]))
+        self.dec5 = dec_unit(inp=out5, filter_mult=32, name='D5')
         print(self.dec5.output_shape)
-        out4 = tf.keras.Input(shape=(8, 8, 64*num_filters))
-        self.dec4 = dec_unit(inp=out4, filter_mult=32, name='D4')
+        out4 = tf.keras.Input(shape=(self.dec5.output_shape[1:]))
+        self.dec4 = dec_unit(inp=out4, filter_mult=24, name='D4')
         print(self.dec4.output_shape)
-        out3 = tf.keras.Input(shape=(16, 16, 32*num_filters))
+        out3 = tf.keras.Input(shape=(self.dec4.output_shape[1:]))
         self.dec3 = dec_unit(inp=out3, filter_mult=16, name='D3')
         print(self.dec3.output_shape)
-        out2 = tf.keras.Input(shape=(32, 32, 16*num_filters))
+        out2 = tf.keras.Input(shape=(self.dec3.output_shape[1:]))
         self.dec2 = dec_unit(inp=out2, filter_mult=8, name='D2')
         print(self.dec2.output_shape)
-        out1 = tf.keras.Input(shape=(64, 64, 8*num_filters))
+        out1 = tf.keras.Input(shape=(self.dec2.output_shape[1:]))
         self.dec1 = dec_unit(inp=out1, last=True, filter_mult=4, name='D1')
         print(self.dec1.output_shape)
 
@@ -330,7 +336,7 @@ class AE_A(tf.keras.Model):
 
 
 model = AE_A()
-tf.keras.utils.plot_model(model.build_graph(), model_name+".png", show_shapes=True, expand_nested=True)
+tf.keras.utils.plot_model(model.build_graph(), model_name+'.png', show_shapes=True, expand_nested=True)
 model.train_model(model_name)
 model.load(model_name)
 image_dataset, length = utils.create_dataset(batch_size=batch_size)
