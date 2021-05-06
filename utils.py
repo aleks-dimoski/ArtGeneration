@@ -48,7 +48,7 @@ def print_time_remaining(cur_epoch, tot_epochs, time_taken):
 
 
 
-def test_model(model, source=None, style=None, num='0', test=False, name='test'):
+def test_model(model, source=None, style=None, num='0', test=False, name='test', details=''):
     if style == None:
         source = np.reshape(np.array(source[0][0]), (1, 256, 256, 3))
         new_img = model(source)
@@ -66,8 +66,6 @@ def test_model(model, source=None, style=None, num='0', test=False, name='test')
         os.mkdir(os.path.join('pred' + name))
 
     if test:
-        pred.save(os.path.join('pred' + name, 'test.png'))
-
         plt.figure(figsize=(6, 6))
 
         plt.subplot(3, 2, 1)
@@ -92,8 +90,8 @@ def test_model(model, source=None, style=None, num='0', test=False, name='test')
             plt.grid(False)
         except Exception:
             plt.grid(False)
-
-        plt.show()
+        plt.savefig(os.path.join('pred' + name, f'epoch_{num}_{details}.png'))
+        #plt.show()
     else:
         pred.save(os.path.join('pred' + name, 'epoch_' + str(num) + '.png'))
 
