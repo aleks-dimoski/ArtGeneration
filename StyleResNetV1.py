@@ -18,8 +18,8 @@ set_session(sess)
 identity_lr = 1
 kl_lr = .5
 num_epochs = 200
-num_filters = 14
-batch_size = 3
+num_filters = 12
+batch_size = 2
 learning_rate = 2e-4
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -187,6 +187,7 @@ class AE_A(tf.keras.Model):
         tf.keras.models.save_model(model=self.skip3, filepath=dr + fname + '\\' + self.skip3.name)
         tf.keras.models.save_model(model=self.skip2, filepath=dr + fname + '\\' + self.skip2.name)
         tf.keras.models.save_model(model=self.skip1, filepath=dr + fname + '\\' + self.skip1.name)'''
+        tf.keras.models.save_model(model=self.res50, filepath=dr + fname + '\\' + self.res50.name)
         tf.keras.models.save_model(model=self.dec5, filepath=dr + fname + '\\' + self.dec5.name)
         tf.keras.models.save_model(model=self.dec4, filepath=dr + fname + '\\' + self.dec4.name)
         tf.keras.models.save_model(model=self.dec3, filepath=dr + fname + '\\' + self.dec3.name)
@@ -206,6 +207,7 @@ class AE_A(tf.keras.Model):
         self.skip3 = tf.keras.models.load_model(dr + fname + '\\' + self.skip3.name, compile=compile)
         self.skip2 = tf.keras.models.load_model(dr + fname + '\\' + self.skip2.name, compile=compile)
         self.skip1 = tf.keras.models.load_model(dr + fname + '\\' + self.skip1.name, compile=compile)'''
+        self.res50 = tf.keras.models.load_model(dr + fname + '\\' + self.res50.name, compile=compile)
         self.dec5 = tf.keras.models.load_model(dr + fname + '\\' + self.dec5.name, compile=compile)
         self.dec4 = tf.keras.models.load_model(dr + fname + '\\' + self.dec4.name, compile=compile)
         self.dec3 = tf.keras.models.load_model(dr + fname + '\\' + self.dec3.name, compile=compile)
@@ -309,6 +311,8 @@ class AE_A(tf.keras.Model):
                     break
                 #act = keract.get_activations(self, source)
                 #keract.display_activations(act)
+            if i % 5 == 0:
+                self.res50.trainable = True
             print('\n')
 
             image_dataset, _ = utils.create_dataset(batch_size=batch_size)
@@ -345,7 +349,7 @@ image_dataset, length = utils.create_dataset(batch_size=batch_size)
 
 for source in zip(image_dataset.take(1)):
     for style in zip(image_dataset.take(1)):
-        utils.test_model(model, source, test=True, name=model_name)
-        utils.test_model(model, source, style, test=True, name=model_name)
+        utils.test_model(model, source, style=None, test=True, name=model_name)
+        utils.test_model(model, source, style=None, test=True, name=model_name)
         break
     break

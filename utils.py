@@ -51,7 +51,7 @@ def print_time_remaining(cur_epoch, tot_epochs, time_taken):
 def test_model(model, source=None, style=None, num='0', test=False, name='test', details=''):
     if style == None:
         source = np.reshape(np.array(source[0][0]), (1, 256, 256, 3))
-        new_img = model(source)
+        new_img = model.call(source)
         style = np.ones_like(source)
     else:
         source = np.reshape(np.array(source[0][0]), (1, 256, 256, 3))
