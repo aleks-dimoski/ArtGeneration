@@ -18,28 +18,31 @@ set_session(sess)
 identity_lr = 1
 kl_lr = .5
 num_epochs = 200
-num_filters = 1
-batch_size = 2
+num_filters = 14
+batch_size = 3
 learning_rate = 2e-4
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-model_name = 'V6'
-display_mod = 10
+model_name = 'ResV1'
+display_mod = 1
 
 conv2DT = tf.keras.layers.Conv2DTranspose
 conv2D = tf.keras.layers.Conv2D
 
 
-def res_block(inp, filter_mult, reduce_size=False):
-    x = conv2D(num_filters * filter_mult, kernel_size=(1, 1), strides=(1, 1), padding='same')(inp)
-    x = tf.keras.activations.gelu(x)
-    x = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(1, 1), padding='same')(x)
-    x = tf.keras.activations.gelu(x)
-    x = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(1, 1), padding='same')(x)
-    x = tf.keras.activations.gelu(x)
-    x = conv2D(num_filters * filter_mult, kernel_size=(1, 1), strides=(1, 1), padding='same')(x)
-    x = tf.keras.activations.gelu(x)
-    x = tf.keras.layers.Add()([x, inp])
+def enc_subunit(inp, filter_mult, reduce_size=False):
+    x = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(1, 1), padding='same')(inp)
+    x = tfa.layers.InstanceNormalization()(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    if not reduce_size:
+        x = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(1, 1), padding='same')(x)
+    else:
+        inp = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(2, 2), padding='same')(inp)
+        x = conv2D(num_filters * filter_mult, kernel_size=(3, 3), strides=(2, 2), padding='same')(x)
+    x = tfa.layers.InstanceNormalization()(x)
+    x = tf.keras.layers.LeakyReLU()(x)
+    x = tf.keras.layers.Concatenate()([x, inp])
+    x = tf.keras.layers.Conv2D(num_filters * filter_mult * 2, kernel_size=(3, 3), strides=(1, 1), padding='same')(x)
     return x
 
 
@@ -47,35 +50,20 @@ def enc_unit(inp, filter_mult=1, name='enc', first=False):
     if first:
         x = conv2D(num_filters*filter_mult, kernel_size=(7, 7), strides=(2, 2), padding='same')(inp)
         x = tfa.layers.InstanceNormalization()(x)
-        x = tf.keras.layers.AvgPool2D()(x)
+        x = tf.keras.layers.MaxPool2D()(x)
 
-        x = res_block(x, filter_mult)
-        x = res_block(x, filter_mult)
-        x = res_block(x, filter_mult)
-        x = conv2D(num_filters * filter_mult * 4, kernel_size=(1, 1), strides=(1, 1), padding='same')(x)
-        x = tf.keras.layers.AvgPool2D()(x)
+        x = enc_subunit(x, filter_mult)
+        x = enc_subunit(x, filter_mult*2)
 
         return tf.keras.Model(inputs=inp, outputs=x, name=name)
 
-    x = res_block(inp, filter_mult)
-    x = res_block(x, filter_mult)
-    x = res_block(x, filter_mult)
-    x = conv2D(num_filters*filter_mult*4, kernel_size=(1, 1), strides=(1, 1), padding='same')(x)
-    x = tf.keras.layers.AvgPool2D()(x)
+    x = enc_subunit(inp, filter_mult, reduce_size=True)
+    x = enc_subunit(x, filter_mult*2)
 
     return tf.keras.Model(inputs=inp, outputs=x, name=name)
 
 
-def dec_unit(inp, filter_mult, name='dec'):
-    x1 = res_block(inp[0], filter_mult=filter_mult)
-    x2 = conv2D(num_filters*filter_mult, kernel_size=(1, 1), strides=(1, 1), padding='same')(inp[1])
-    x = tf.keras.layers.Add()([inp[0], x1])
-    x = tf.keras.layers.Add()([x, x2])
-    x = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='nearest')(x)
-    return tf.keras.Model(inputs=inp, outputs=x, name=name)
-
-
-'''def dec_unit(inp, filter_mult=1, name='dec', last=False, first=False):
+def dec_unit(inp, filter_mult=1, name='dec', last=False, first=False):
     #x = conv2DT(num_filters * filter_mult*2, (3, 3), strides=(2, 2), padding='same')(inp)
     if first and not last:
         x = conv2DT(num_filters * filter_mult, (1, 1), strides=(1, 1), padding='same')(inp)
@@ -87,20 +75,27 @@ def dec_unit(inp, filter_mult, name='dec'):
         x = conv2DT(num_filters * filter_mult, (3, 3), strides=(1, 1), padding='same')(x)
         return tf.keras.Model(inputs=inp, outputs=x, name=name)
     else:
-        x = conv2DT(64, (1, 1), strides=(2, 2), padding='same')(inp)
+        x = conv2DT(64, (1, 1), strides=(1, 1), padding='same')(inp)
         x = tf.keras.layers.LeakyReLU()(x)
         x = conv2DT(3, (7, 7), strides=(2, 2), padding='same', activation='sigmoid')(x)
-        return tf.keras.Model(inputs=inp, outputs=x, name=name)'''
+        return tf.keras.Model(inputs=inp, outputs=x, name=name)
 
 
 def latent_skip(x, latent_dims=16, name='latent_skip', training=True):
     filter_count = x.get_shape().as_list()[-1]
-    y = tf.keras.layers.Conv2D(filter_count, (1, 1), strides=(1, 1), padding='same')(x)
+    y1 = tf.keras.layers.Conv2D(filter_count, (2, 2), strides=(2, 2), padding='same')(x)
+    y = tf.keras.layers.Flatten()(y1)
+    y = tf.keras.layers.Dense(latent_dims, activation='relu')(y)
+    if training:
+        y = tf.keras.layers.Dropout(.2)(y)
+    y = tf.keras.layers.Dense(utils.get_size(y1))(y)
+    y = tf.keras.layers.Reshape((y1.get_shape().as_list()[1], y1.get_shape().as_list()[2], filter_count))(y)
+    y = tf.keras.layers.Conv2DTranspose(filter_count, (2, 2), strides=(2, 2), padding='same')(y)
     return tf.keras.Model(inputs=x, outputs=y, name=name)
 
 
 def latent(inp, latent_dims=128, name='latent', training=True):
-    x = tf.keras.layers.Conv2D(512, kernel_size=(3, 3), strides=(2, 2), padding='same')(inp)
+    x = tf.keras.layers.Conv2D(256, kernel_size=(3, 3), strides=(2, 2), padding='same')(inp)
     w = tf.keras.layers.Flatten()(x)
     w = tf.keras.layers.Dense(latent_dims)(w)
     if training:
@@ -112,10 +107,10 @@ def latent(inp, latent_dims=128, name='latent', training=True):
     return tf.keras.Model(inputs=inp, outputs=[w, w_mean, w_log_var], name=name)
 
 
-def reshape_latent(inp, filter_mult, out_shape, name='reshape_latent'):
+def reshape_latent(inp, out_shape, name='reshape_latent'):
     x = tf.keras.layers.Dense(utils.get_size(out_shape), activation='relu')(inp)
     x = tf.keras.layers.Reshape(out_shape)(x)
-    x = tf.keras.layers.Conv2D(num_filters*filter_mult, kernel_size=(3, 3), strides=(1, 1), padding='same')(x)
+    x = tf.keras.layers.Conv2D(40*num_filters, kernel_size=(3, 3), strides=(1, 1), padding='same')(x)
     return tf.keras.Model(inputs=inp, outputs=x, name=name)
 
 
@@ -129,47 +124,49 @@ class AE_A(tf.keras.Model):
 
         inp1 = tf.keras.Input(shape=(256, 256, 3))
         print(inp1.get_shape())
-        self.enc1 = enc_unit(inp=inp1, filter_mult=3, first=True, name='E1')
+        self.res50 = tf.keras.applications.ResNet50(include_top=False, weights='imagenet', input_tensor=inp1)
+        self.res50.trainable = False
+        '''self.enc1 = enc_unit(inp=inp1, filter_mult=2, first=True, name='E1')
         print(self.enc1.output_shape)
         inp2 = tf.keras.Input(shape=(self.enc1.output_shape[1:]))
-        self.enc2 = enc_unit(inp=inp2, filter_mult=4*3, name='E2')
+        self.enc2 = enc_unit(inp=inp2, filter_mult=4, name='E2')
         print(self.enc2.output_shape)
         inp3 = tf.keras.Input(shape=(self.enc2.output_shape[1:]))
-        self.enc3 = enc_unit(inp=inp3, filter_mult=(4**2)*3, name='E3')
+        self.enc3 = enc_unit(inp=inp3, filter_mult=6, name='E3')
         print(self.enc3.output_shape)
         inp4 = tf.keras.Input(shape=(self.enc3.output_shape[1:]))
-        self.enc4 = enc_unit(inp=inp4, filter_mult=(4**3)*3, name='E4')
+        self.enc4 = enc_unit(inp=inp4, filter_mult=8, name='E4')
         print(self.enc4.output_shape)
         inp5 = tf.keras.Input(shape=(self.enc4.output_shape[1:]))
-        self.enc5 = enc_unit(inp=inp5, filter_mult=(4**4)*3, name='E5')
+        self.enc5 = enc_unit(inp=inp5, filter_mult=10, name='E5')
         print(self.enc5.output_shape)
 
-        '''inp_latent = tf.keras.Input(shape=(self.enc5.output_shape[1:]))
+        inp_latent = tf.keras.Input(shape=(self.enc5.output_shape[1:]))
         self.latent1 = latent(inp=inp_latent, latent_dims=600*num_filters, training=training)
         print('latent', self.latent1.output_shape[0])
         inp_reshape = tf.keras.Input(shape=(600*num_filters))
         self.reshape_l = reshape_latent(inp_reshape, out_shape=(self.enc5.output_shape[1:]))
-        print(self.reshape_l.output_shape)'''
+        print(self.reshape_l.output_shape)
 
-        self.skip4 = latent_skip(inp5, name='latent_skip4', training=training)
-        self.skip3 = latent_skip(inp4, name='latent_skip3', training=training)
-        self.skip2 = latent_skip(inp3, name='latent_skip2', training=training)
-        self.skip1 = latent_skip(inp2, name='latent_skip1', training=training)
+        self.skip4 = latent_skip(inp5, latent_dims=128*num_filters, name='latent_skip4', training=training) #256
+        self.skip3 = latent_skip(inp4, latent_dims=64*num_filters, name='latent_skip3', training=training) #128
+        self.skip2 = latent_skip(inp3, latent_dims=16*num_filters, name='latent_skip2', training=training) #32
+        self.skip1 = latent_skip(inp2, latent_dims=8*num_filters, name='latent_skip1', training=training) #16'''
 
-        out5 = tf.keras.Input(shape=(self.enc5.output_shape[1:]))
-        self.dec5 = dec_unit(inp=out5, filter_mult=(4**4)*3, name='D5')
+        out5 = tf.keras.Input(shape=(self.res50.output_shape[1:]))
+        self.dec5 = dec_unit(inp=out5, filter_mult=32, name='D5')
         print(self.dec5.output_shape)
         out4 = tf.keras.Input(shape=(self.dec5.output_shape[1:]))
-        self.dec4 = dec_unit(inp=out4, filter_mult=(4**3)*3, name='D4')
+        self.dec4 = dec_unit(inp=out4, filter_mult=24, name='D4')
         print(self.dec4.output_shape)
         out3 = tf.keras.Input(shape=(self.dec4.output_shape[1:]))
-        self.dec3 = dec_unit(inp=out3, filter_mult=(4**2)*3, name='D3')
+        self.dec3 = dec_unit(inp=out3, filter_mult=16, name='D3')
         print(self.dec3.output_shape)
         out2 = tf.keras.Input(shape=(self.dec3.output_shape[1:]))
-        self.dec2 = dec_unit(inp=out2, filter_mult=4*3, name='D2')
+        self.dec2 = dec_unit(inp=out2, filter_mult=8, name='D2')
         print(self.dec2.output_shape)
         out1 = tf.keras.Input(shape=(self.dec2.output_shape[1:]))
-        self.dec1 = dec_unit(inp=out1, last=True, filter_mult=3, name='D1')
+        self.dec1 = dec_unit(inp=out1, last=True, filter_mult=2, name='D1')
         print(self.dec1.output_shape)
 
     def save(self, fname):
@@ -179,17 +176,17 @@ class AE_A(tf.keras.Model):
                 os.mkdir(dr + fname)
             except OSError:
                 print("File save failed.")
-        tf.keras.models.save_model(model=self.enc1, filepath=dr + fname + '\\' + self.enc1.name)
+        '''tf.keras.models.save_model(model=self.enc1, filepath=dr + fname + '\\' + self.enc1.name)
         tf.keras.models.save_model(model=self.enc2, filepath=dr + fname + '\\' + self.enc2.name)
         tf.keras.models.save_model(model=self.enc3, filepath=dr + fname + '\\' + self.enc3.name)
         tf.keras.models.save_model(model=self.enc4, filepath=dr + fname + '\\' + self.enc4.name)
         tf.keras.models.save_model(model=self.enc5, filepath=dr + fname + '\\' + self.enc5.name)
-        #tf.keras.models.save_model(model=self.latent1, filepath=dr + fname + '\\' + self.latent1.name)
-        #tf.keras.models.save_model(model=self.reshape_l, filepath=dr + fname + '\\' + self.reshape_l.name)
+        tf.keras.models.save_model(model=self.latent1, filepath=dr + fname + '\\' + self.latent1.name)
+        tf.keras.models.save_model(model=self.reshape_l, filepath=dr + fname + '\\' + self.reshape_l.name)
         tf.keras.models.save_model(model=self.skip4, filepath=dr + fname + '\\' + self.skip4.name)
         tf.keras.models.save_model(model=self.skip3, filepath=dr + fname + '\\' + self.skip3.name)
         tf.keras.models.save_model(model=self.skip2, filepath=dr + fname + '\\' + self.skip2.name)
-        tf.keras.models.save_model(model=self.skip1, filepath=dr + fname + '\\' + self.skip1.name)
+        tf.keras.models.save_model(model=self.skip1, filepath=dr + fname + '\\' + self.skip1.name)'''
         tf.keras.models.save_model(model=self.dec5, filepath=dr + fname + '\\' + self.dec5.name)
         tf.keras.models.save_model(model=self.dec4, filepath=dr + fname + '\\' + self.dec4.name)
         tf.keras.models.save_model(model=self.dec3, filepath=dr + fname + '\\' + self.dec3.name)
@@ -198,17 +195,17 @@ class AE_A(tf.keras.Model):
 
     def load(self, fname, compile=True):
         dr = os.getcwd() + '\\'
-        self.enc1 = tf.keras.models.load_model(dr + fname + '\\' + self.enc1.name, compile=compile)
+        '''self.enc1 = tf.keras.models.load_model(dr + fname + '\\' + self.enc1.name, compile=compile)
         self.enc2 = tf.keras.models.load_model(dr + fname + '\\' + self.enc2.name, compile=compile)
         self.enc3 = tf.keras.models.load_model(dr + fname + '\\' + self.enc3.name, compile=compile)
         self.enc4 = tf.keras.models.load_model(dr + fname + '\\' + self.enc4.name, compile=compile)
         self.enc5 = tf.keras.models.load_model(dr + fname + '\\' + self.enc5.name, compile=compile)
-        #self.latent1 = tf.keras.models.load_model(dr + fname + '\\' + self.latent1.name, compile=compile)
-        #self.reshape_l = tf.keras.models.load_model(dr + fname + '\\' + self.reshape_l.name, compile=compile)
+        self.latent1 = tf.keras.models.load_model(dr + fname + '\\' + self.latent1.name, compile=compile)
+        self.reshape_l = tf.keras.models.load_model(dr + fname + '\\' + self.reshape_l.name, compile=compile)
         self.skip4 = tf.keras.models.load_model(dr + fname + '\\' + self.skip4.name, compile=compile)
         self.skip3 = tf.keras.models.load_model(dr + fname + '\\' + self.skip3.name, compile=compile)
         self.skip2 = tf.keras.models.load_model(dr + fname + '\\' + self.skip2.name, compile=compile)
-        self.skip1 = tf.keras.models.load_model(dr + fname + '\\' + self.skip1.name, compile=compile)
+        self.skip1 = tf.keras.models.load_model(dr + fname + '\\' + self.skip1.name, compile=compile)'''
         self.dec5 = tf.keras.models.load_model(dr + fname + '\\' + self.dec5.name, compile=compile)
         self.dec4 = tf.keras.models.load_model(dr + fname + '\\' + self.dec4.name, compile=compile)
         self.dec3 = tf.keras.models.load_model(dr + fname + '\\' + self.dec3.name, compile=compile)
@@ -217,42 +214,48 @@ class AE_A(tf.keras.Model):
 
     #@tf.function
     def call(self, x):
-        y1 = self.merge(x, x)
-        return y1
+        y1 = self.encode(x)
+        return self.decode(y1)
 
     def encode(self, x):
-        x1 = self.enc1(x)
+        '''x1 = self.enc1(x)
         x2 = self.enc2(x1)
         x3 = self.enc3(x2)
         x4 = self.enc4(x3)
         x5 = self.enc5(x4)
-        return x5, x4, x3, x2, x1
+        w_hold = self.latent1(x5)
+        w = w_hold[0]
+        w_mean = w_hold[1]
+        w_log_var = w_hold[2]
+        return w, w_mean, w_log_var, x4, x3, x2, x1'''
+        return self.res50(x)
 
-    def decode(self, x5, x4, x3, x2, x1):
+    def decode(self, w):
+        '''w = self.reshape_l(w)
         x4 = self.skip4(x4)
         x3 = self.skip3(x3)
         x2 = self.skip2(x2)
-        x1 = self.skip1(x1)
-        y5 = self.dec5(x5)
-        y5 = tf.keras.layers.Add()([x4, y5])
-        y5 = tf.keras.layers.BatchNormalization()(y5)
+        x1 = self.skip1(x1)'''
+        y5 = self.dec5(w)
+        #y5 = tf.keras.layers.Add()([x4, y5])
+        #y5 = tf.keras.layers.BatchNormalization()(y5)
         y4 = self.dec4(y5)
-        y4 = tf.keras.layers.Add()([x3, y4])
-        y4 = tf.keras.layers.BatchNormalization()(y4)
+        #y4 = tf.keras.layers.Add()([x3, y4])
+        #y4 = tf.keras.layers.BatchNormalization()(y4)
         y3 = self.dec3(y4)
-        y3 = tf.keras.layers.Add()([x2, y3])
-        y3 = tf.keras.layers.BatchNormalization()(y3)
+        #y3 = tf.keras.layers.Add()([x2, y3])
+        #y3 = tf.keras.layers.BatchNormalization()(y3)
         y2 = self.dec2(y3)
-        y2 = tf.keras.layers.Add()([x1, y2])
-        y2 = tf.keras.layers.BatchNormalization()(y2)
+        #y2 = tf.keras.layers.Add()([x1, y2])
+        #y2 = tf.keras.layers.BatchNormalization()(y2)
         y1 = self.dec1(y2)
         return y1
 
     def merge(self, source, style, slice=2):
-        x5, x4, x3, x2, x1 = self.encode(source)
-        source = [x5, x4, x3, x2, x1]
-        x5, x4, x3, x2, x1 = self.encode(style)
-        style = [x5, x4, x3, x2, x1]
+        w, _, _, x4, x3, x2, x1 = self.encode(source)
+        source = [w, x4, x3, x2, x1]
+        w, _, _, x4, x3, x2, x1 = self.encode(style)
+        style = [w, x4, x3, x2, x1]
         merged = style[:slice] + source[slice:]
         return self.decode(merged[0], merged[1], merged[2], merged[3], merged[4])
 
@@ -287,7 +290,7 @@ class AE_A(tf.keras.Model):
                     if batch_on % record_batch == 0:
                         print(f'Beginning batch #{batch_on} out of {dataset_size} of size {batch_size}')
                         self.loss_identity += [loss_identity]
-                        self.kl_loss += [0]
+                        #self.kl_loss += [kl_loss]
                 except Exception:
                     print(f'Batch #{batch_on} failed. Continuing with next batch.')
                 batch_on += 1
@@ -302,7 +305,7 @@ class AE_A(tf.keras.Model):
                 model_val.loss['KL'] = self.kl_loss
                 utils.test_model(model_val, source, num=i, test=True, name=model_name, details='identity')
                 for style in zip(image_dataset.take(1)):
-                    utils.test_model(model_val, source, style, num=i, test=True, name=model_name, details='merge')
+                    utils.test_model(model_val, source, style=None, num=i, test=True, name=model_name, details='merge')
                     break
                 #act = keract.get_activations(self, source)
                 #keract.display_activations(act)
@@ -315,14 +318,16 @@ class AE_A(tf.keras.Model):
     def train_step(self, source, optimizer):
         with tf.GradientTape() as tape:
             prediction = self(source[0])
-            loss_identity = identity_lr * (
+            loss = identity_lr * (
                             0.5 * tf.reduce_mean(tf.reduce_sum(cross_entropy(source[0], prediction)))
                             + 0.5 * tf.reduce_mean(tf.reduce_sum((source[0]-prediction)**2)))
-            loss = loss_identity
+            '''kl_loss = -0.5 * (1 + w_log_var - tf.square(w_mean) - tf.exp(w_log_var))
+            kl_loss = kl_lr * tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1))
+            loss = (loss_identity + kl_loss)'''
 
         grads = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        return loss_identity
+        return loss
 
     def build_graph(self):
         source = Input(shape=(256, 256, 3))

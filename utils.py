@@ -103,6 +103,7 @@ def record_steps(num=0):
     return num / 4
 
 
+@tf.autograph.experimental.do_not_convert
 class Sampling(tf.keras.layers.Layer):
     def call(self, inputs):
         z_mean, z_log_var = inputs
