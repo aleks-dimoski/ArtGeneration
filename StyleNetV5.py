@@ -274,7 +274,6 @@ class AE_A(tf.keras.Model):
         record_batch = utils.record_steps(dataset_size)
 
         start_time = time.time()
-        print("Beginning training at", start_time)
 
         for i in range(num_epochs):
             print(f'Starting epoch {i}/{num_epochs}')

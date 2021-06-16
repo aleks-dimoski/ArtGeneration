@@ -311,8 +311,6 @@ class AE_A(tf.keras.Model):
                     break
                 #act = keract.get_activations(self, source)
                 #keract.display_activations(act)
-            if i % 5 == 0:
-                self.res50.trainable = True
             print('\n')
 
             image_dataset, _ = utils.create_dataset(batch_size=batch_size)

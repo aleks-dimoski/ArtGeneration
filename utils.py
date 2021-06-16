@@ -92,6 +92,7 @@ def test_model(model, source=None, style=None, num='0', test=False, name='test',
             plt.grid(False)
         plt.savefig(os.path.join('pred' + name, f'epoch_{num}_{details}.png'))
         #plt.show()
+        plt.close()
     else:
         pred.save(os.path.join('pred' + name, 'epoch_' + str(num) + '.png'))
 
