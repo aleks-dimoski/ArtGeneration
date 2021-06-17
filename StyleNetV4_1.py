@@ -18,8 +18,9 @@ set_session(sess)
 identity_lr = 1
 kl_lr = .1
 num_epochs = 200
-num_filters = 4
+num_filters = 3
 batch_size = 6
+record_after_epochs = 5
 learning_rate = 2e-4
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -95,6 +96,7 @@ def dec_unit(inp, filter_mult=1, name='dec', last=False):
 def latent(inp, latent_dims=128, name='latent'):
     x = tf.keras.layers.Flatten()(inp)
     w = tf.keras.layers.Dense(latent_dims, activation='relu')(x)
+    w = tf.keras.layers.BatchNormalization()(w)
     w_mean = tf.keras.layers.Dense(latent_dims, name='w_mean')(w)
     w_log_var = tf.keras.layers.Dense(latent_dims, name='w_log_var')(w)
     w = utils.Sampling()([w_mean, w_log_var])
@@ -246,7 +248,7 @@ class AE_A(tf.keras.Model):
         record_batch = utils.record_steps(int(dataset_size/2))
 
         start_time = time.time()
-        print("Beginning training at", start_time)
+        #print("Beginning training at", start_time)
 
         for i in range(num_epochs):
             print("Starting epoch {}/{}".format(i, num_epochs))
@@ -264,20 +266,18 @@ class AE_A(tf.keras.Model):
                 batch_on += 1
             duration = time.time() - start
             print(int(duration / 60), "minutes &", int(duration % 60), "seconds, for epoch", i)
-            if i % 10 == 0:
+            if i % record_after_epochs == 0:
                 self.loss['Identity'] = self.loss_identity
                 self.loss['KL'] = self.kl_loss
-                utils.test_model(self, source, num=i, name=model_name)
-            if i % 10 == 0:
-                self.loss['Identity'] = self.loss_identity
-                self.loss['KL'] = self.kl_loss
-                utils.test_model(self, source, test=True, name=model_name)
+                utils.test_model(self, source, test=True, num=i, name=model_name, details='recon')
                 for style in zip(image_dataset.take(1)):
-                    utils.test_model(self, source, style, test=True, name=model_name)
+                    utils.test_model(self, source, style, num=i, test=True, name=model_name, details='styled')
                     break
                 #act = keract.get_activations(self, source)
                 #keract.display_activations(act)
             print('\n')
+            duration = time.time() - start
+            utils.print_time_remaining(i, num_epochs, duration)
             image_dataset, _ = utils.create_dataset(batch_size=batch_size)
             self.save(fname)
             time.sleep(.5)
