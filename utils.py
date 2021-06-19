@@ -47,6 +47,12 @@ def print_time_remaining(cur_epoch, tot_epochs, time_taken):
     print("Estimated time remaining is", str(datetime.timedelta(seconds=time_taken*remaining)))
 
 
+def gram_matrix(input_tensor):
+    result = tf.linalg.einsum('bijc,bijd->bcd', input_tensor, input_tensor) #forms the gram matrix.
+    input_shape = tf.shape(input_tensor)
+    num_locations = tf.cast(input_shape[1]*input_shape[2], tf.float32)
+    return result/(num_locations)
+
 
 def test_model(model, source=None, style=None, num='0', test=False, name='test', details=''):
     if style == None:
@@ -54,8 +60,8 @@ def test_model(model, source=None, style=None, num='0', test=False, name='test',
         new_img = model.call(source)
         style = np.ones_like(source)
     else:
-        source = np.reshape(np.array(source[0][0]), (1, 256, 256, 3))
-        style = np.reshape(np.array(style[0][0]), (1, 256, 256, 3))
+        source = np.reshape(np.array(source[0]), (1, 256, 256, 3))
+        style = np.reshape(np.array(style[0]), (1, 256, 256, 3))
         new_img = model.merge(source, style)
 
     new_img = np.array(new_img) * 255.
