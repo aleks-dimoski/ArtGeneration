@@ -233,7 +233,7 @@ class AE_A(tf.keras.Model):
         start_time = time.time()
         #print("Beginning training at", start_time)
         for source, style in zip(image_dataset.take(int(dataset_size / 2)), image_dataset.take(int(dataset_size / 2))):
-            pass
+            break
 
         for i in range(num_epochs):
             print("Starting epoch {}/{}".format(i, num_epochs))

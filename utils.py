@@ -19,7 +19,7 @@ def create_dataset(batch_size=4):
         batch_size=batch_size,
         color_mode='rgb',
         class_mode=None,
-        #steps_per_epoch
+        target_size=(256, 256)
     )
     image_dgen = tf.keras.preprocessing.image.ImageDataGenerator(**dgen_params)
     image_gen = image_dgen.flow_from_directory('D:\Storage\Technical\Linux Resources\Images\ArtGen', **gen_params)
