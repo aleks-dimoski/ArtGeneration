@@ -32,18 +32,18 @@ def tensor_to_image(tensor, fname=None):
     if np.ndim(tensor)>3:
         assert tensor.shape[0] == 1
         tensor = tensor[0]
-    plt.imshow(PIL.Image.fromarray(tensor))
-    plt.show()
+    #plt.imshow(PIL.Image.fromarray(tensor))
+    #plt.show()
     if fname:
         PIL.Image.fromarray(tensor).save(fname)
 
 
-content_path = 'predV7\Source.jpg'
-style_path = 'predV7\Style.jpg'
+content_path = 'predNeuralTransfer\Source.jpg'
+style_path = 'predNeuralTransfer\Style.jpg'
 
 
 def load_img(path_to_img):
-    max_dim = 512
+    max_dim = 640
     img = tf.io.read_file(path_to_img)
     img = tf.image.decode_image(img, channels=3)
     img = tf.image.convert_image_dtype(img, tf.float32)
@@ -75,19 +75,25 @@ hub_model = hub.load('https://tfhub.dev/google/magenta/arbitrary-image-stylizati
 stylized_image = hub_model(tf.constant(content_image), tf.constant(style_image))[0]
 tensor_to_image(stylized_image)
 
-vgg = tf.keras.applications.VGG19(include_top=False, weights='imagenet')
+vgg = tf.keras.applications.inception_v3.InceptionV3(include_top=False, weights='imagenet')
+tf.keras.utils.plot_model(vgg, "Inception.png", show_shapes=True, expand_nested=True)
 
 print()
 for layer in vgg.layers:
     print(layer.name)
 
-content_layers = ['block5_conv2']
+content_layers = ['mixed2',
+                  'mixed7',
+                  'mixed8',
+                  'mixed9',
+                  'mixed10']
 
-style_layers = ['block1_conv1',
-                'block2_conv1',
-                'block3_conv1',
-                'block4_conv1',
-                'block5_conv1']
+style_layers = ['mixed1',
+                'mixed2',
+                'mixed3',
+                'mixed4',
+                'mixed5',
+                'mixed6']
 
 num_content_layers = len(content_layers)
 num_style_layers = len(style_layers)
@@ -95,7 +101,7 @@ num_style_layers = len(style_layers)
 def vgg_layers(layer_names):
     """ Creates a vgg model that returns a list of intermediate output values."""
     # Load our model. Load pretrained VGG, trained on imagenet data
-    vgg = tf.keras.applications.VGG19(include_top=False, weights='imagenet')
+    vgg = tf.keras.applications.inception_v3.InceptionV3(include_top=False, weights='imagenet')
     vgg.trainable = False
 
     outputs = [vgg.get_layer(name).output for name in layer_names]
@@ -107,13 +113,13 @@ style_extractor = vgg_layers(style_layers)
 style_outputs = style_extractor(style_image*255)
 
 #Look at the statistics of each layer's output
-for name, output in zip(style_layers, style_outputs):
+'''for name, output in zip(style_layers, style_outputs):
     print(name)
     print("  shape: ", output.numpy().shape)
     print("  min: ", output.numpy().min())
     print("  max: ", output.numpy().max())
     print("  mean: ", output.numpy().mean())
-    print()
+    print()'''
 
 def gram_matrix(input_tensor):
     result = tf.linalg.einsum('bijc,bijd->bcd', input_tensor, input_tensor)
@@ -154,7 +160,7 @@ class StyleContentModel(tf.keras.models.Model):
 extractor = StyleContentModel(style_layers, content_layers)
 
 results = extractor(tf.constant(content_image))
-
+'''
 print('Styles:')
 for name, output in sorted(results['style'].items()):
     print("  ", name)
@@ -171,7 +177,7 @@ for name, output in sorted(results['content'].items()):
     print("    min: ", output.numpy().min())
     print("    max: ", output.numpy().max())
     print("    mean: ", output.numpy().mean())
-
+'''
 style_targets = extractor(style_image)['style']
 content_targets = extractor(content_image)['content']
 
@@ -186,7 +192,7 @@ opt = tf.optimizers.Adam(learning_rate=0.02, beta_1=0.99, epsilon=1e-1)
 
 style_weight = 1e-3
 content_weight = 1e4
-total_variation_weight = 500
+total_variation_weight = 50
 
 
 
@@ -203,16 +209,6 @@ def style_content_loss(outputs):
     loss = style_loss + content_loss
     return loss
 
-
-@tf.function()
-def train_step(image):
-    with tf.GradientTape() as tape:
-        outputs = extractor(image)
-        loss = style_content_loss(outputs)
-
-    grad = tape.gradient(loss, image)
-    opt.apply_gradients([(grad, image)])
-    image.assign(clip_0_1(image))
 
 '''
 start = time.time()
@@ -274,18 +270,17 @@ start = time.time()
 
 epochs = 10
 steps_per_epoch = 100
-
 step = 0
+
+file_name = 'predNeuralTransfer\stylized-image.png'
 for n in range(epochs):
   for m in range(steps_per_epoch):
     step += 1
     train_step(image)
     print(".", end='', flush=True)
   display.clear_output(wait=True)
-  tensor_to_image(image)
+  tensor_to_image(image, fname=file_name)
   print("Train step: {}".format(step))
 
 end = time.time()
 print("Total time: {:.1f}".format(end-start))
-file_name = 'predV7\stylized-image.png'
-tensor_to_image(image, fname=file_name)
