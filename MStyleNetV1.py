@@ -22,6 +22,7 @@ num_epochs = 200
 num_filters = 3
 batch_size = 3
 learning_rate = 2e-4
+record_epoch = 5
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 model_name = 'VM1'
@@ -119,7 +120,7 @@ class AE_A(tf.keras.Model):
         inp_latent = tf.keras.Input(shape=(1, 1, 4 * 4 * 4 * 4 * num_filters))
         self.latent1 = latent(inp=inp_latent, latent_dims=512)
         print(self.latent1.output_shape[0])
-        inp_reshape = tf.keras.Input(shape=(512*2,))
+        inp_reshape = tf.keras.Input(shape=(512,))
         self.reshape_l = reshape_latent(inp_reshape, out_shape=(1, 1, 4 * 4 * 4 * 4 * num_filters))
         print(self.reshape_l.output_shape)
 
@@ -177,7 +178,7 @@ class AE_A(tf.keras.Model):
     def call(self, x):
         w, _, _ = self.encode(x)
         w1 = self.vgg(x)
-        w = tf.keras.layers.Concatenate()([w, w1])
+        w = tf.keras.layers.Add()([w, w1])
         y = self.decode(w)
         return y
 
@@ -230,7 +231,7 @@ class AE_A(tf.keras.Model):
             start = time.time()
             batch_on = 0
             for source in zip(image_dataset.take(int(dataset_size / 2))):
-                loss_identity, kl_loss = self.train_step(source, optimizer)
+                loss_identity, kl_loss = train_step(self, source, optimizer)
                 if batch_on % record_batch == 0:
                     print("Beginning batch #" + str(batch_on), 'out of', int(dataset_size / 2), 'of size', batch_size)
                     self.loss_identity += [loss_identity]
@@ -238,16 +239,11 @@ class AE_A(tf.keras.Model):
                 batch_on += 1
             duration = time.time() - start
             print(int(duration / 60), "minutes &", int(duration % 60), "seconds, for epoch", i)
-            if i % 10 == 0:
+            if i % record_epoch == 0:
                 self.loss['Identity'] = self.loss_identity
                 self.loss['KL'] = self.kl_loss
-                utils.test_model(self, source, num=i, name=model_name)
-            if i % 10 == 0:
-                self.loss['Identity'] = self.loss_identity
-                self.loss['KL'] = self.kl_loss
-                utils.test_model(self, source, test=True, name=model_name)
                 for style in zip(image_dataset.take(1)):
-                    utils.test_model(self, source, test=True, name=model_name, details='test')
+                    utils.test_model(self, source, num=i, test=True, name=model_name, details='test')
                     break
             print('\n')
             image_dataset, _ = utils.create_dataset(batch_size=batch_size)
@@ -255,24 +251,26 @@ class AE_A(tf.keras.Model):
             time.sleep(.5)
         print('Training completed in', int((time.time() - start_time) / 60), "minutes &", int(duration % 60), "seconds")
 
-    #@tf.function
-    def train_step(self, source, optimizer):
-        with tf.GradientTape() as tape:
-            w, w_mean, w_log_var = self.encode(source)
-            prediction = self(source[0])
-            loss_identity = identity_lr * learning_rate * (0.2 * tf.reduce_mean(tf.reduce_sum(cross_entropy(source[0],
-                                        prediction))) + tf.reduce_mean(tf.reduce_sum((source[0] - prediction) ** 2)))
-            kl_loss = -0.5 * (1 + w_log_var - tf.square(w_mean) - tf.exp(w_log_var))
-            kl_loss = kl_lr * tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1)) * learning_rate
-            loss = (loss_identity + kl_loss)
-
-        grads = tape.gradient(loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        return loss_identity, kl_loss
-
     def build_graph(self):
         source = Input(shape=(256, 256, 3))
         return tf.keras.Model(inputs=source, outputs=self.call(source), name=model_name)
+
+
+@tf.function
+def train_step(model, source, optimizer):
+    with tf.GradientTape() as tape:
+        w, w_mean, w_log_var = model.encode(source)
+        prediction = model(source[0])
+        loss_identity = identity_lr * learning_rate *\
+                        (0.2 * tf.reduce_mean(tf.reduce_sum(cross_entropy(source[0], prediction)))
+                         + tf.reduce_mean(tf.reduce_sum((source[0] - prediction) ** 2)))
+        kl_loss = -0.5 * (1 + w_log_var - tf.square(w_mean) - tf.exp(w_log_var))
+        kl_loss = kl_lr * tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1)) * learning_rate
+        loss = (loss_identity + kl_loss)
+
+    grads = tape.gradient(loss, model.trainable_variables)
+    optimizer.apply_gradients(zip(grads, model.trainable_variables))
+    return loss_identity, kl_loss
 
 
 model = AE_A()

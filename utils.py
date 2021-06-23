@@ -1,10 +1,17 @@
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from PIL import Image
 import os
+import cv2
 import datetime
 from scipy import stats
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import colors
+from skimage.color import rgb2gray, rgb2hsv, hsv2rgb
+from skimage.io import imread, imshow
+from sklearn.cluster import KMeans
 
 
 def create_dataset(batch_size=4):
@@ -55,13 +62,15 @@ def gram_matrix(input_tensor):
 
 
 def test_model(model, source=None, style=None, num='0', test=False, name='test', details=''):
-    if style == None:
-        source = np.reshape(np.array(source[0][0]), (1, 256, 256, 3))
+    source = np.array(source)
+    if style is None:
+        source = np.reshape(source[0], (1, source.shape[1], source.shape[2], source.shape[3]))
         new_img = model.call(source)
         style = np.ones_like(source)
     else:
-        source = np.reshape(np.array(source[0]), (1, 256, 256, 3))
-        style = np.reshape(np.array(style[0]), (1, 256, 256, 3))
+        style = np.array(style)
+        source = np.reshape(source[0], (1, source.shape[1], source.shape[2], source.shape[3]))
+        style = np.reshape(style[0], (1, style.shape[1], style.shape[2], style.shape[3]))
         new_img = model.merge(source, style)
 
     new_img = np.array(new_img) * 255.
@@ -110,6 +119,94 @@ def record_steps(num=0):
     return num / 4
 
 
+def image_to_pandas(image):
+    df = pd.DataFrame([image[:, :, 0].flatten(),
+                       image[:, :, 1].flatten(),
+                       image[:, :, 2].flatten()]).T
+    df.columns = ['Red_Channel', 'Green_Channel', 'Blue_Channel']
+    return df
+
+
+def image_segmentation(img, img2=None, n=4):
+    img = np.reshape(np.array(img[0]), (256, 256, 3))
+    plt.figure(figsize=(4, 4))
+    plt.subplot(2, 2, 1)
+    imshow(img)
+    df = image_to_pandas(img)
+    plt.subplot(2, 2, 2)
+    kmeans = KMeans(n_clusters=n, random_state=42).fit(df)
+    result = kmeans.labels_.reshape(img.shape[0], img.shape[1])
+    imshow(result, cmap='gray')
+    if not img2 is None:
+        plt.subplot(2, 2, 3)
+        img2 = np.reshape(np.array(img2[0]), (256, 256, 3))
+        imshow(img2)
+        df = image_to_pandas(img2)
+        plt.subplot(2, 2, 4)
+        kmeans = KMeans(n_clusters=n, random_state=42).fit(df)
+        result = kmeans.labels_.reshape(img2.shape[0], img2.shape[1])
+        imshow(result, cmap='gray')
+    plt.show()
+    pixel_plotter(df)
+    pixel_plotter_clusters(df, result)
+
+
+def pixel_plotter(df):
+    x_3d = df['Red_Channel']
+    y_3d = df['Green_Channel']
+    z_3d = df['Blue_Channel']
+
+    color_list = list(zip(df['Red_Channel'].to_list(),
+                          df['Blue_Channel'].to_list(),
+                          df['Green_Channel'].to_list()))
+    norm = colors.Normalize(vmin=0, vmax=1.)
+    norm.autoscale(color_list)
+    p_color = norm(color_list).tolist()
+
+    fig = plt.figure(figsize=(12, 10))
+    ax_3d = plt.axes(projection='3d')
+    ax_3d.scatter3D(xs=x_3d, ys=y_3d, zs=z_3d,
+                    c=p_color, alpha=0.55);
+
+    ax_3d.set_xlim3d(0, x_3d.max())
+    ax_3d.set_ylim3d(0, y_3d.max())
+    ax_3d.set_zlim3d(0, z_3d.max())
+    ax_3d.invert_zaxis()
+
+    ax_3d.view_init(-165, 60)
+    plt.show()
+
+
+def pixel_plotter_clusters(df, result):
+    df['cluster'] = result.flatten()
+    x_3d = df['Red_Channel']
+    y_3d = df['Green_Channel']
+    z_3d = df['Blue_Channel']
+
+    fig = plt.figure(figsize=(12, 10))
+    ax_3d = plt.axes(projection='3d')
+    ax_3d.scatter3D(xs=x_3d, ys=y_3d, zs=z_3d,
+                    c=df['cluster'], alpha=0.55);
+
+    ax_3d.set_xlim3d(0, x_3d.max())
+    ax_3d.set_ylim3d(0, y_3d.max())
+    ax_3d.set_zlim3d(0, z_3d.max())
+    ax_3d.invert_zaxis()
+
+    ax_3d.view_init(-165, 60)
+    plt.show()
+
+
+def get_random_crop(image, crop_height, crop_width):
+    image = image[0]
+    max_x = image.shape[1] - crop_width
+    max_y = image.shape[0] - crop_height
+    x = np.random.randint(0, max_x)
+    y = np.random.randint(0, max_y)
+    crop = image[y: y + crop_height, x: x + crop_width]
+    return crop
+
+
 @tf.autograph.experimental.do_not_convert
 class Sampling(tf.keras.layers.Layer):
     def call(self, inputs):
@@ -118,3 +215,13 @@ class Sampling(tf.keras.layers.Layer):
         dim = tf.shape(z_mean)[1]
         epsilon = tf.keras.backend.random_normal(shape=(batch, dim))
         return z_mean + tf.exp(0.5 * z_log_var) * epsilon
+
+
+def test_k_means():
+    image_dataset, dataset_size = create_dataset(batch_size=1)
+    for img, img2 in zip(image_dataset.take(1), image_dataset.take(1)):
+        for i in range(2, 6):
+            image_segmentation(img, img2=img2, n=i)
+        break
+
+#test_k_means()
