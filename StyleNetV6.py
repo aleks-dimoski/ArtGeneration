@@ -18,9 +18,9 @@ set_session(sess)
 
 identity_lr = 1
 kl_lr = .1
-num_epochs = 200
-num_filters = 32
-batch_size = 32
+num_epochs = 50
+num_filters = 64
+batch_size = 24
 learning_rate = 2e-4
 record_epochs = 2
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
@@ -181,8 +181,8 @@ class AE_A(tf.keras.Model):
         print('Training completed in', int((time.time() - start_time) / 60), "minutes &", int(duration % 60), "seconds")
 
     def build_graph(self):
-        source = Input(shape=(32, 32, 3))
-        return tf.keras.Model(inputs=source, outputs=self.call(source), name=model_name)
+        print(self.model.summary())
+        return self.model
 
 
 @tf.function
@@ -208,17 +208,19 @@ image_dataset, _ = utils.create_dataset(batch_size=1)
 for layer in model.layers:
     print(layer.name)
 
-content_layers = ['conv2d_10',
-                  'flatten']
+content_layers = ['conv2d_transpose_3']
 
-style_layers = ['conv2d_2',
+style_layers = ['conv2d',
+                'conv2d_1',
+                'conv2d_2',
                 'conv2d_3',
                 'conv2d_4',
                 'conv2d_5',
                 'conv2d_6',
                 'conv2d_7',
                 'conv2d_8',
-                'conv2d_9']
+                'conv2d_9',
+                'conv2d_10']
 
 num_content_layers = len(content_layers)
 num_style_layers = len(style_layers)
@@ -239,9 +241,9 @@ for source, style in zip(image_dataset.take(1), image_dataset.take(1)):
     break
 
 source = np.expand_dims(np.array(style)[0], axis=0)
-style = np.expand_dims(utils.get_random_crop(np.array(style), 32, 32), axis=0)
+style = np.expand_dims(utils.get_random_crop(np.array(style)[0], 32, 32), axis=0)
 
-style_outputs = style_extractor(style*255)
+style_outputs = style_extractor(style[0]*255)
 
 class StyleContentModel(tf.keras.models.Model):
     def __init__(self, style_layers, content_layers):
@@ -327,7 +329,7 @@ def tensor_to_image(tensor, fname=None):
 
 extractor = StyleContentModel(style_layers, content_layers)
 
-style_targets = extractor(style)['style']
+style_targets = extractor(style[0])['style']
 
 image = np.array(source)
 
@@ -343,21 +345,21 @@ epochs = 10
 steps_per_epoch = 100
 step = 0
 
-file_name = 'predNeuralTransfer\stylized-image.png'
-for n in range(epochs):
-    for m in range(steps_per_epoch):
-        step += 1
-        for x in range(0, int(256/32)-1):
-            for y in range(0, int(256/32)-1):
-                block = image[:, x*32:(x+1)*32, y*32:(y+1)*32, :]
-                results = extractor(tf.constant(block))
-                content_targets = extractor(block)['content']
-                block = tf.Variable(block)
+file_name = 'stylized-image.png'
+for x in range(0, int(256/32)-1):
+    for y in range(0, int(256/32)-1):
+        block = image[:, x*32:(x+1)*32, y*32:(y+1)*32, :]
+        results = extractor(tf.constant(block))
+        content_targets = extractor(block)['content']
+        block = tf.Variable(block)
+        for n in range(epochs):
+            for m in range(steps_per_epoch):
                 train_image(block)
-                image[:, x * 32:(x + 1) * 32, y * 32:(y + 1) * 32, :] = np.array(block)
-        print(".", end='', flush=True)
-    tensor_to_image(image, fname=file_name)
-    print("Train step: {}".format(step))
+                step += 1
+            print(".", end='', flush=True)
+        image[:, x * 32:(x + 1) * 32, y * 32:(y + 1) * 32, :] = np.array(block)
+        tensor_to_image(image, fname=file_name)
+        print("Train step: {}".format(step))
 
 end = time.time()
 print("Total time: {:.1f}".format(end-start))

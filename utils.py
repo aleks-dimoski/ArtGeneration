@@ -198,12 +198,14 @@ def pixel_plotter_clusters(df, result):
 
 
 def get_random_crop(image, crop_height, crop_width):
-    image = image[0]
-    max_x = image.shape[1] - crop_width
-    max_y = image.shape[0] - crop_height
+    if len(image.shape) <= 3:
+        image = np.expand_dims(image, axis=0)
+    #image = image[0]
+    max_x = image.shape[2] - crop_width
+    max_y = image.shape[1] - crop_height
     x = np.random.randint(0, max_x)
     y = np.random.randint(0, max_y)
-    crop = image[y: y + crop_height, x: x + crop_width]
+    crop = image[:, y: y + crop_height, x: x + crop_width]
     return crop
 
 
